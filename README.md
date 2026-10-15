@@ -37,6 +37,13 @@ row**, plus a trigger that auto-creates the row on sign-up. The app also upserts
 profile on every login — and if the table isn't set up yet, the app keeps working
 (the sync failure is ignored).
 
+The signed-in user's details are shown in a **Profile panel**: a card at the bottom of
+the sidebar (and the avatar in the header) opens a modal with name, email, sign-in
+provider, "member since", "last seen" and the account ID — plus a sign-out button.
+
+> **One-shot option:** `supabase-setup-all.sql` runs both migrations above in a single
+> paste (safe/idempotent). Run it once in the Supabase SQL Editor.
+
 ### Google login
 Enable **Google** under Supabase → Authentication → Providers, and add your site
 URL under Authentication → URL Configuration → Redirect URLs.
