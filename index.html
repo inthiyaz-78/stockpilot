@@ -66,6 +66,35 @@ tailwind.config = {
   .grid-bg { background-image: linear-gradient(rgba(148,163,184,.09) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,.09) 1px, transparent 1px); background-size: 44px 44px; }
   .glass { background: rgba(255,255,255,.92); backdrop-filter: blur(18px); }
   .glass-dark { background: rgba(15,23,42,.55); backdrop-filter: blur(14px); }
+
+  /* ===== Modern Interactive (compact, <1KB) ===== */
+  .magnetic { transition:transform .12s cubic-bezier(.2,.7,.2,1), box-shadow .12s ease; }
+  .magnetic:active { transform:scale(.96); transition:transform .05s; }
+  .stagger-in > * { opacity:0; transform:translateY(16px); animation:staggerUp .4s cubic-bezier(.2,.7,.2,1) forwards; }
+  @keyframes staggerUp { to{opacity:1;transform:none} }
+  .stagger-in > *:nth-child(1){animation-delay:0ms}
+  .stagger-in > *:nth-child(2){animation-delay:50ms}
+  .stagger-in > *:nth-child(3){animation-delay:100ms}
+  .stagger-in > *:nth-child(4){animation-delay:150ms}
+  .stagger-in > *:nth-child(5){animation-delay:200ms}
+  .stagger-in > *:nth-child(6){animation-delay:250ms}
+  .stagger-in > *:nth-child(7){animation-delay:300ms}
+  .stagger-in > *:nth-child(8){animation-delay:350ms}
+  .glass-card { background:rgba(255,255,255,.75); backdrop-filter:blur(16px); border:1px solid rgba(255,255,255,.35); }
+  .dark .glass-card { background:rgba(30,41,59,.75); border:1px solid rgba(255,255,255,.12); }
+  .shadow-layered { box-shadow:0 2px 8px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.05); }
+  .dark .shadow-layered { box-shadow:0 2px 8px rgba(0,0,0,.25), 0 8px 24px rgba(0,0,0,.15); }
+  .counter { display:inline-block; animation:countUp .5s cubic-bezier(.2,.7,.2,1) backwards; }
+  @keyframes countUp { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
+  .ripple { position:relative; overflow:hidden; }
+  .ripple::after { content:''; position:absolute; inset:0; background:rgba(255,255,255,.3); transform:scale(0); animation:rippleOut .3s ease-out; pointer-events:none; }
+  @keyframes rippleOut { to{transform:scale(4);opacity:0} }
+  .dark .ripple::after { background:rgba(99,102,241,.25); }
+  .interactive-row:hover { background:rgba(99,102,241,.05); transform:translateX(3px); }
+  .dark .interactive-row:hover { background:rgba(99,102,241,.1); }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; } }
+  @media (hover: none) { .magnetic:hover, .interactive-row:hover { transform:none; box-shadow:none; } }
+  :focus-visible { outline:2px solid #6366f1; outline-offset:2px; }
 </style>
 </head>
 <body class="bg-slate-50 text-slate-800">
