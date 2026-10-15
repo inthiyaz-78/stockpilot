@@ -52,6 +52,7 @@ const SB_CONFIG_KEY = 'stockpilot.supabase.v1';
 const SUPABASE_URL = 'https://ybfvkxbavmfndktpwrxz.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InliZnZreGJhdm1mbmRrdHB3cnh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjU3ODgsImV4cCI6MjEwNzY0MTc4OH0.7qZ3utdkR54xGvi8qDWF6PB4j2yo850kbkha5TbN1Rc';
 const RAZORPAY_KEY_ID = 'YOUR_RAZORPAY_KEY_ID'; // e.g. rzp_test_1DP5mmOlF5G5ag
+const REDIRECT_URL = 'https://stockpilot.vercel.app'; // change if you rename the Vercel project
 // =================================================================
 
 function getSbConfig() { try { const r = localStorage.getItem(SB_CONFIG_KEY); return r ? JSON.parse(r) : null; } catch(e) { return null; } }
@@ -221,7 +222,7 @@ function LoginScreen({ sb }) {
     try {
       const { error: e } = await sb.auth.signInWithOAuth({
         provider: 'google',
-        options: { redirectTo: window.location.origin + window.location.pathname }
+        options: { redirectTo: REDIRECT_URL }
       });
       if (e) { setError(e.message); setLoading(false); }
     } catch (err) { setError(err.message); setLoading(false); }
