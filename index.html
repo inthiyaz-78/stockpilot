@@ -364,14 +364,23 @@ function App() {
   // Auth state
   useEffect(() => {
     if (!sbClient) { setAuthLoading(false); return; }
-    sbClient.auth.getSession().then(({ data }) => {
-      setUser(data.session?.user || null);
-      setAuthLoading(false);
-    });
+    let cancelled = false;
+    // Wait a tick for Supabase to process the #access_token in the URL
+    const timer = setTimeout(async () => {
+      try {
+        const { data } = await sbClient.auth.getSession();
+        if (!cancelled) {
+          setUser(data.session?.user || null);
+          setAuthLoading(false);
+        }
+      } catch (e) {
+        if (!cancelled) setAuthLoading(false);
+      }
+    }, 500);
     const { data: { subscription } } = sbClient.auth.onAuthStateChange((_e, session) => {
-      setUser(session?.user || null);
+      if (!cancelled) setUser(session?.user || null);
     });
-    return () => subscription?.unsubscribe();
+    return () => { cancelled = true; clearTimeout(timer); subscription?.unsubscribe(); };
   }, [sbClient]);
 
   // Fetch data from Supabase
