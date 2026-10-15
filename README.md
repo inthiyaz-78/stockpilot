@@ -61,6 +61,11 @@ Two options in the **Pro** modal:
 2. **Card via Razorpay (test mode).** Paste a test key into `RAZORPAY_KEY_ID` in `index.html`
    (e.g. `rzp_test_…`). Test keys need **no KYC/PAN**; use Razorpay test cards.
 
+After a successful payment the app **activates Pro locally** for that account (stored per-user as
+`stockpilot.pro.<userId>`). The header crown turns amber (**PRO**), the sidebar profile card and the
+profile modal show a **PRO** badge, and the Pro modal shows a "You're on Pro" panel with a
+**Cancel Pro (demo)** option.
+
 > Going **live** with any RBI-regulated gateway (Razorpay/Cashfree/PayU) requires KYC incl. PAN —
 > that is mandatory. Direct UPI is the way to take real money with no PAN.
 

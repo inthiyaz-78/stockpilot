@@ -141,6 +141,11 @@ function loadData() {
 function saveData(d, scope){ try { localStorage.setItem(storageKey(scope), JSON.stringify(d)); } catch(e){} }
 function loadCache(scope){ try { const raw = localStorage.getItem(storageKey(scope)); return raw ? JSON.parse(raw) : null; } catch(e){ return null; } }
 
+// Per-account Pro flag (local prototype entitlement).
+function proKey(scope){ return 'stockpilot.pro.' + (scope || 'anon'); }
+function loadPro(scope){ try { return localStorage.getItem(proKey(scope)) === '1'; } catch(e){ return false; } }
+function savePro(scope, on){ try { if (on) localStorage.setItem(proKey(scope), '1'); else localStorage.removeItem(proKey(scope)); } catch(e){} }
+
 function fmtMoney(n){ return '₹' + Number(n||0).toLocaleString('en-IN'); }
 function fmtNum(n){ return Number(n||0).toLocaleString('en-IN'); }
 function fmtDate(s){ const d=new Date(s); return d.toLocaleDateString('en-IN', {day:'numeric',month:'short'}); }
@@ -814,7 +819,7 @@ function upiLink(upiId, amount, note){
   return 'upi://pay?pa='+q(upiId)+'&pn='+q(UPI_NAME)+'&am='+amount+'&cu=INR&tn='+q(note)+'&tr=SP'+Date.now();
 }
 const UPI_ID_RE = /^[a-zA-Z0-9._-]{2,}@[a-zA-Z]{2,}$/;
-function PaymentModal({ open, onClose, sb, user }) {
+function PaymentModal({ open, onClose, sb, user, isPro, onActivate, onDeactivate }) {
   const [plan, setPlan] = useState('monthly');
   const [method, setMethod] = useState('upi');
   const [loading, setLoading] = useState(false);
@@ -873,6 +878,7 @@ function PaymentModal({ open, onClose, sb, user }) {
         description: 'Pro subscription',
         handler: function (response) {
           alert('Payment successful! Payment ID: ' + response.razorpay_payment_id);
+          try { onActivate && onActivate(); } catch (e) {}
           setLoading(false); onClose();
         },
         prefill: { email: user?.email || '', contact: user?.phone || '' },
@@ -908,16 +914,32 @@ function PaymentModal({ open, onClose, sb, user }) {
       <div className="absolute inset-0 bg-slate-900/40 modal-backdrop"></div>
       <div className="relative bg-white rounded-2xl shadow-soft w-full max-w-md max-h-[92vh] overflow-auto" onClick={e=>e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <h3 className="text-lg font-semibold text-slate-800">Upgrade to Pro</h3>
+          <h3 className="text-lg font-semibold text-slate-800">{isPro ? 'Your Pro plan' : 'Upgrade to Pro'}</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400"><i className="fa-solid fa-xmark"></i></button>
         </div>
 
-        {paid ? (
+        {isPro ? (
+          <div className="p-6 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-300 to-amber-500 text-slate-900 flex items-center justify-center text-2xl mx-auto mb-3"><i className="fa-solid fa-crown"></i></div>
+            <div className="font-semibold text-slate-800">You're on Pro 🎉</div>
+            <p className="text-sm text-slate-500 mt-1">All Pro features are unlocked for this account.</p>
+            <div className="bg-slate-50 rounded-xl p-4 mt-4 text-left text-sm text-slate-600">
+              <ul className="space-y-1.5">
+                <li><i className="fa-solid fa-check text-emerald-500 mr-2"></i>Unlimited products &amp; suppliers</li>
+                <li><i className="fa-solid fa-check text-emerald-500 mr-2"></i>Demand forecasting &amp; reports</li>
+                <li><i className="fa-solid fa-check text-emerald-500 mr-2"></i>Multi-shop &amp; staff roles</li>
+                <li><i className="fa-solid fa-check text-emerald-500 mr-2"></i>Priority support</li>
+              </ul>
+            </div>
+            <Button className="w-full mt-5 justify-center" onClick={onClose}>Done</Button>
+            <button onClick={()=>{ try { onDeactivate && onDeactivate(); } catch (e) {} }} className="text-xs text-slate-400 hover:text-rose-500 mt-3">Cancel Pro (demo)</button>
+          </div>
+        ) : paid ? (
           <div className="p-6 text-center">
             <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center text-2xl mx-auto mb-3"><i className="fa-solid fa-check"></i></div>
-            <div className="font-semibold text-slate-800">Thanks for your payment!</div>
-            <p className="text-sm text-slate-500 mt-1">We'll verify the UPI transfer of <span className="font-medium text-slate-700">₹{amount}</span> and activate your Pro plan shortly.</p>
-            <Button className="w-full mt-5 justify-center" onClick={onClose}>Done</Button>
+            <div className="font-semibold text-slate-800">Payment received — Pro activated!</div>
+            <p className="text-sm text-slate-500 mt-1">Thanks! Your Pro plan is now active on this account.</p>
+            <Button className="w-full mt-5 justify-center" onClick={onClose}>Awesome</Button>
           </div>
         ) : (
           <div className="p-6">
@@ -962,7 +984,7 @@ function PaymentModal({ open, onClose, sb, user }) {
                   <Button className="w-full mt-4 justify-center" onClick={openUpi}><i className="fa-solid fa-mobile-screen-button"></i>Pay ₹{amount} via UPI app</Button>
                   <div className="flex items-center justify-center gap-4 mt-3">
                     <button onClick={copyLink} className="text-xs text-slate-500 hover:text-slate-700">{copied ? 'Link copied!' : 'Copy payment link'}</button>
-                    <button onClick={()=>setPaid(true)} className="text-xs text-brand-600 hover:text-brand-700 font-medium">I've paid</button>
+                    <button onClick={()=>{ try { onActivate && onActivate(); } catch (e) {} setPaid(true); }} className="text-xs text-brand-600 hover:text-brand-700 font-medium">I've paid</button>
                   </div>
                   <p className="text-[11px] text-slate-400 mt-3"><i className="fa-solid fa-shield-halved mr-1"></i>Direct UPI — no card, no KYC needed</p>
                 </div>
@@ -1005,7 +1027,7 @@ function ProviderBadge({ provider }) {
   return <Badge tone="blue"><i className={it.icon}></i><span className="ml-1.5">{it.label}</span></Badge>;
 }
 
-function ProfileModal({ open, onClose, profile, user, onSignOut }) {
+function ProfileModal({ open, onClose, profile, user, isPro, onSignOut }) {
   const [copied, setCopied] = useState(false);
   const p = profile || {};
   const name = p.full_name || (user && (user.user_metadata && (user.user_metadata.full_name || user.user_metadata.name))) || 'User';
@@ -1032,7 +1054,10 @@ function ProfileModal({ open, onClose, profile, user, onSignOut }) {
                     : (name || email || 'U').charAt(0).toUpperCase()}
           </div>
           <div className="min-w-0">
-            <div className="text-lg font-bold truncate">{name}</div>
+            <div className="text-lg font-bold truncate flex items-center gap-2">
+              <span className="truncate">{name}</span>
+              {isPro && <span className="shrink-0 text-[10px] font-bold tracking-wide bg-gradient-to-r from-amber-300 to-amber-500 text-slate-900 px-1.5 py-0.5 rounded"><i className="fa-solid fa-crown mr-1"></i>PRO</span>}
+            </div>
             <div className="text-sm text-slate-300 truncate">{email}</div>
           </div>
         </div>
@@ -1040,6 +1065,10 @@ function ProfileModal({ open, onClose, profile, user, onSignOut }) {
 
       {/* Rows */}
       <div className="space-y-3">
+        <div className="flex items-center justify-between py-2.5 px-3.5 rounded-xl bg-slate-50">
+          <span className="text-sm text-slate-500"><i className="fa-solid fa-crown w-4 mr-2 text-slate-400"></i>Plan</span>
+          {isPro ? <Badge tone="amber"><i className="fa-solid fa-crown mr-1"></i>Pro</Badge> : <Badge tone="slate">Free</Badge>}
+        </div>
         <div className="flex items-center justify-between py-2.5 px-3.5 rounded-xl bg-slate-50">
           <span className="text-sm text-slate-500"><i className="fa-solid fa-at w-4 mr-2 text-slate-400"></i>Email</span>
           <span className="text-sm font-medium text-slate-800 truncate max-w-[60%]">{email}</span>
@@ -1092,6 +1121,7 @@ function App() {
   const [paymentModal, setPaymentModal] = useState(false);
   const [profile, setProfile] = useState(null);        // row from the `profiles` table
   const [profileOpen, setProfileOpen] = useState(false);
+  const [isPro, setIsPro] = useState(false);            // local Pro entitlement, per account
 
   useEffect(() => { sbRef.current = sbClient; }, [sbClient]);
   useEffect(() => { saveData(data, user?.id || 'anon'); }, [data, user?.id]);
@@ -1204,6 +1234,12 @@ function App() {
     created_at: user.created_at || null,
     last_seen: null
   } : null);
+
+  // Local Pro entitlement, scoped per account (so each login has its own).
+  const proScope = user?.id || 'anon';
+  useEffect(() => { setIsPro(loadPro(proScope)); }, [proScope]);
+  const activatePro = useCallback(() => { savePro(proScope, true); setIsPro(true); }, [proScope]);
+  const deactivatePro = useCallback(() => { savePro(proScope, false); setIsPro(false); }, [proScope]);
 
   const products = data.products;
   const suppliers = data.suppliers;
@@ -1426,7 +1462,10 @@ function App() {
               )}
             </div>
             <div className="min-w-0 flex-1">
-              <div className="text-sm font-medium text-white truncate">{prof?.full_name || 'User'}</div>
+              <div className="text-sm font-medium text-white truncate flex items-center gap-1.5">
+                <span className="truncate">{prof?.full_name || 'User'}</span>
+                {isPro && <span className="shrink-0 text-[9px] font-bold tracking-wide bg-gradient-to-r from-amber-300 to-amber-500 text-slate-900 px-1.5 py-0.5 rounded">PRO</span>}
+              </div>
               <div className="text-xs text-slate-400 truncate">{prof?.email || 'Signed in'}</div>
             </div>
             <i className="fa-solid fa-chevron-right text-[10px] text-slate-500"></i>
@@ -1464,8 +1503,8 @@ function App() {
               <i className="fa-solid fa-bell"></i>
               {(stats.low.length+stats.out.length)>0 && <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-white"></span>}
             </button>
-            <button onClick={()=>setPaymentModal(true)} className="h-9 px-3 rounded-xl bg-gradient-to-r from-brand-500 to-brand-700 text-white text-sm font-medium hover:opacity-90 transition flex items-center gap-1.5">
-              <i className="fa-solid fa-crown text-xs"></i><span className="hidden sm:inline">Pro</span>
+            <button onClick={()=>setPaymentModal(true)} title={isPro ? 'Pro active — manage plan' : 'Upgrade to Pro'} className={`h-9 px-3 rounded-xl text-sm font-semibold transition flex items-center gap-1.5 ${isPro ? 'bg-gradient-to-r from-amber-300 to-amber-500 text-slate-900 shadow-sm' : 'bg-gradient-to-r from-brand-500 to-brand-700 text-white hover:opacity-90'}`}>
+              <i className="fa-solid fa-crown text-xs"></i><span className="hidden sm:inline">{isPro ? 'PRO' : 'Pro'}</span>
             </button>
             <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
               <button onClick={()=>setProfileOpen(true)} className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-400 to-brand-700 flex items-center justify-center text-white text-xs font-bold overflow-hidden hover:ring-2 hover:ring-brand-300 transition" title="View profile">
@@ -1496,9 +1535,9 @@ function App() {
 
       <Assistant products={products} suppliers={suppliers} sales={sales} stats={stats} prodById={prodById} supById={supById} setView={setView} user={user} />
 
-      <PaymentModal open={paymentModal} onClose={()=>setPaymentModal(false)} sb={sbClient} user={user} />
+      <PaymentModal open={paymentModal} onClose={()=>setPaymentModal(false)} sb={sbClient} user={user} isPro={isPro} onActivate={activatePro} onDeactivate={deactivatePro} />
 
-      <ProfileModal open={profileOpen} onClose={()=>setProfileOpen(false)} profile={prof} user={user} onSignOut={()=>sbClient.auth.signOut()} />
+      <ProfileModal open={profileOpen} onClose={()=>setProfileOpen(false)} profile={prof} user={user} isPro={isPro} onSignOut={()=>sbClient.auth.signOut()} />
     </div>
   );
 }
