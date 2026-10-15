@@ -14,10 +14,25 @@ No build step required. Just open `index.html` in any modern browser:
 
 ## Database / backend (Supabase)
 
-1. Create a free Supabase project.
-2. Open the SQL editor and run `supabase-schema.sql` (creates suppliers/products/sales tables + dev RLS).
-3. In the app, click **Database → Save & connect** with your Project URL and anon key.
-4. Optionally push the seeded sample data with **Push local data to DB**.
+The app connects automatically to the embedded Supabase project. Each signed-in
+Google account gets **its own private data** (enforced by `user_id` + Row Level Security).
+
+### First-time setup
+1. Create a free Supabase project (or use the embedded one).
+2. In the SQL editor, run `supabase-schema.sql` (creates suppliers/products/sales
+   tables with `user_id` and per-user RLS policies).
+
+### Upgrading an existing project (per-account isolation)
+If you already created the tables with the old open/dev policies, run
+`supabase-migration-multiuser.sql` once. It adds the `user_id` column to every table
+and replaces the wide-open policies with `auth.uid() = user_id` policies.
+
+> Without this migration the app will show a connection error, because inserts
+> include the new `user_id` column.
+
+### Google login
+Enable **Google** under Supabase → Authentication → Providers, and add your site
+URL under Authentication → URL Configuration → Redirect URLs.
 
 ## Tech stack (chosen for speed + polished UI)
 
@@ -35,7 +50,7 @@ shadcn-inspired, responsive, dashboard-grade interface in a single file.
 - **Dashboard** — KPIs (products, low/out-of-stock, units sold today, inventory value), 7-day revenue chart, live alerts, recent sales, top sellers.
 - **Inventory** — searchable/sortable product table with categories, supplier links, stock adjusters (+/-), add/edit/delete products.
 - **Sales** — record a sale (auto price, stock deduction), filter by period, transaction history, delete-with-stock-restore.
-- **Suppliers** — cards with contacts, edit, and a product drill-down per supplier.
+- **Suppliers** — cards with contacts, edit, delete, and a product drill-down per supplier.
 - **Low stock & reorder** — out/low stock list, average-daily-sales-based reorder suggestions, supplier contact and "add delivered stock".
 - **Data** — export/import JSON, reset to sample data.
 

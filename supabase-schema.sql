@@ -1,7 +1,9 @@
--- StockPilot Supabase schema (dev). Run in Supabase SQL Editor.
+-- StockPilot Supabase schema (multi-user). Run in Supabase SQL Editor.
+-- Each row is owned by the signed-in user (user_id) and protected by RLS.
 
 create table if not exists suppliers (
   id text primary key,
+  user_id uuid references auth.users(id) on delete cascade,
   name text not null,
   contact text,
   phone text,
@@ -13,6 +15,7 @@ create table if not exists suppliers (
 
 create table if not exists products (
   id text primary key,
+  user_id uuid references auth.users(id) on delete cascade,
   name text not null,
   sku text not null,
   category text,
@@ -27,6 +30,7 @@ create table if not exists products (
 
 create table if not exists sales (
   id text primary key,
+  user_id uuid references auth.users(id) on delete cascade,
   product_id text references products(id) on delete cascade,
   qty integer not null,
   price numeric not null,
@@ -34,16 +38,22 @@ create table if not exists sales (
   created_at timestamptz default now()
 );
 
--- DEV ONLY: open RLS so the anon key works from the browser.
--- Replace with auth-scoped policies before production.
+-- Row Level Security: a user can only see and change their own rows.
 alter table suppliers enable row level security;
 alter table products enable row level security;
 alter table sales enable row level security;
 
+-- Remove any old open/dev policies.
 drop policy if exists "dev_all_suppliers" on suppliers;
 drop policy if exists "dev_all_products" on products;
 drop policy if exists "dev_all_sales" on sales;
+drop policy if exists "own_suppliers" on suppliers;
+drop policy if exists "own_products" on products;
+drop policy if exists "own_sales" on sales;
 
-create policy "dev_all_suppliers" on suppliers for all using (true) with check (true);
-create policy "dev_all_products" on products for all using (true) with check (true);
-create policy "dev_all_sales" on sales for all using (true) with check (true);
+create policy "own_suppliers" on suppliers
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own_products" on products
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "own_sales" on sales
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
