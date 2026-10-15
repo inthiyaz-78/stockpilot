@@ -410,6 +410,382 @@ function LoginScreen({ sb }) {
 }
 
 
+// ================= AI Assistant =================
+const AI_KEY_STORAGE = 'stockpilot.ai.key';
+const AI_MODEL_STORAGE = 'stockpilot.ai.model';
+const AI_MODEL_DEFAULT = 'gemini-2.0-flash';
+
+// Safe arithmetic: supports + - * / ^ ( ) %, "X% of Y", sqrt/log/pow, word operators.
+function safeMath(input) {
+  let s = ' ' + String(input || '').toLowerCase().trim() + ' ';
+  s = s.replace(/(\d+(?:\.\d+)?)\s*(?:%|percent)\s*of/g, '($1/100)*');
+  s = s.replace(/\bplus\b/g, ' + ')
+       .replace(/\bminus\b/g, ' - ')
+       .replace(/\b(?:times|multiplied by|multiply by)\b/g, ' * ')
+       .replace(/\b(?:divided by|over)\b/g, ' / ')
+       .replace(/\binto\b/g, ' * ')
+       .replace(/\bsquared\b/g, ' ** 2 ')
+       .replace(/\bcubed\b/g, ' ** 3 ');
+  s = s.replace(/^\s*(?:what\s+is|whats|what's|calculate|compute|solve|evaluate|how\s+much\s+is|result\s+of|value\s+of)\s*/, ' ');
+  s = s.replace(/(\d+(?:\.\d+)?)\s*(?:%|percent)\b/g, '($1/100)');
+  s = s.replace(/[?=,]/g, ' ');
+  s = s.replace(/\bx\b/g, ' * ');
+  s = s.replace(/\bsqrt\b/g, 'Math.sqrt').replace(/\babs\b/g, 'Math.abs')
+       .replace(/\bround\b/g, 'Math.round').replace(/\bfloor\b/g, 'Math.floor')
+       .replace(/\bceil\b/g, 'Math.ceil').replace(/\blog\b/g, 'Math.log')
+       .replace(/\bpow\b/g, 'Math.pow').replace(/\bpi\b/g, 'Math.PI');
+  s = s.trim();
+  if (!s || !/\d/.test(s)) return null;
+  const allowed = /^(?:Math\.(?:sqrt|abs|round|floor|ceil|log|pow|PI)|[0-9+\-*/().^ \t,])+$/;
+  if (!allowed.test(s)) return null;
+  try {
+    const val = Function('"use strict";return (' + s.replace(/\^/g, '**') + ');')();
+    if (typeof val === 'number' && isFinite(val)) return val;
+  } catch (e) {}
+  return null;
+}
+
+function findProduct(query, products) {
+  const stop = new Set(['how','many','of','the','is','are','do','i','have','stock','price','cost','quantity','qty','units','unit','for','a','an','what','whats',"what's",'show','me','my','current','left','in','value','total','and','about','tell','info','details','much','is','it']);
+  const tokens = String(query).toLowerCase().split(/[^a-z0-9]+/).filter(t => t && !stop.has(t));
+  if (!tokens.length) return null;
+  let best = null, bestScore = 0;
+  for (const p of products) {
+    const hay = (p.name + ' ' + (p.sku || '')).toLowerCase();
+    let score = 0;
+    tokens.forEach(t => { if (hay.includes(t)) score++; });
+    if (score > bestScore) { bestScore = score; best = p; }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+// The offline brain: calculations, live inventory answers, and navigation.
+function assistantLocal(text, ctx) {
+  const q = String(text || '').trim();
+  const n = ' ' + q.toLowerCase() + ' ';
+  const products = ctx.products || [], suppliers = ctx.suppliers || [], sales = ctx.sales || [];
+  const prodById = ctx.prodById || {}, supById = ctx.supById || {};
+  const stats = ctx.stats || {};
+  const bullet = (arr) => arr.map(x => '• ' + x).join('\n');
+
+  // 1) Math
+  const m = safeMath(q);
+  if (m !== null) {
+    const out = Number.isInteger(m) ? m : Math.round(m * 1e6) / 1e6;
+    return { handled: true, reply: '`' + q + '` = **' + out.toLocaleString('en-IN') + '**' };
+  }
+
+  // 2) Navigation
+  if (/\b(open|go to|goto|navigate|switch to|take me to|view|show me)\b/.test(n)) {
+    const map = [ ['dashboard','dashboard'], ['inventory','inventory'], ['sales','sales'], ['supplier','suppliers'], ['low stock','alerts'], ['alert','alerts'], ['reorder','alerts'], ['out of stock','alerts'], ['restock','alerts'] ];
+    for (const [k, v] of map) if (n.includes(k)) return { handled: true, navigate: v, reply: 'Opening **' + v.charAt(0).toUpperCase() + v.slice(1) + '**…' };
+  }
+
+  // 3) Greetings / thanks
+  if (/^\s*(hi|hello|hey|yo|hola|namaste|good (morning|afternoon|evening))\b/.test(n)) {
+    return { handled: true, reply: 'Hi! 👋 I\'m your StockPilot assistant. Ask me about **low stock**, **inventory value**, **top sellers**, or a **calculation** like "18% of 3500".' };
+  }
+  if (/\b(thank|thanks|thank you|thx)\b/.test(n)) return { handled: true, reply: 'You\'re welcome! Anything else I can check?' };
+
+  // 4) Help
+  if (/\b(help|what can you do|commands|features|capabilities|what do you do)\b/.test(n)) {
+    return { handled: true, reply: 'I can:\n• Do math — "18% of 3500", "sqrt(144)", "1250*4"\n• Report stock — "low stock", "out of stock", "how many units"\n• Value & sales — "inventory value", "revenue today", "top sellers", "sales today"\n• Look up items — "stock of Basmati Rice", "price of USB-C Cable"\n• Suppliers — "list suppliers", "who supplies earbuds"\n• Navigate — "open sales"' };
+  }
+
+  // 5) Inventory queries
+  const isLow = /\b(low stock|running low|running out|reorder|restock|need to order|stock alert)\b/.test(n);
+  const isOut = /\b(out of stock|out of store|zero stock|sold out|finished)\b/.test(n);
+  if (isOut) {
+    const out = products.filter(p => p.qty <= 0);
+    if (!out.length) return { handled: true, reply: 'Good news — nothing is out of stock right now. ✅' };
+    return { handled: true, reply: '**Out of stock (' + out.length + '):**\n' + bullet(out.map(p => `${p.name} (${p.sku}) — 0 ${p.unit||'units'}`)) };
+  }
+  if (isLow) {
+    const low = products.filter(p => p.qty <= p.minStock);
+    if (!low.length) return { handled: true, reply: 'Everything is above its reorder level. 👍' };
+    return { handled: true, reply: '**Need attention (' + low.length + '):**\n' + bullet(low.map(p => `${p.name} — ${p.qty} ${p.unit||'units'} left (min ${p.minStock})${p.qty<=0?' · OUT':''}`)) };
+  }
+
+  // total inventory value
+  if (/\b(inventory value|stock value|total value|worth|net worth)\b/.test(n) || (/\bvalue\b/.test(n) && /\b(inventory|stock|goods)\b/.test(n))) {
+    const cost = products.reduce((a, p) => a + p.qty * (p.cost || p.price || 0), 0);
+    const retail = products.reduce((a, p) => a + p.qty * (p.price || 0), 0);
+    return { handled: true, reply: 'Inventory value is **' + fmtMoney(cost) + '** at cost (**' + fmtMoney(retail) + '** at selling price).' };
+  }
+
+  // counts
+  if (/\bhow many products\b|\btotal products\b|\bnumber of products\b|\bproduct count\b/.test(n))
+    return { handled: true, reply: 'You have **' + products.length + '** products across **' + suppliers.length + '** suppliers.' };
+  if (/\bhow many suppliers\b|\btotal suppliers\b|\bnumber of suppliers\b/.test(n))
+    return { handled: true, reply: 'You have **' + suppliers.length + '** suppliers.' };
+  if (/\b(how many units|total units|total stock|units in stock|total quantity)\b/.test(n)) {
+    const units = products.reduce((a, p) => a + (p.qty || 0), 0);
+    return { handled: true, reply: 'You currently hold **' + fmtNum(units) + '** units in total.' };
+  }
+
+  // top sellers
+  if (/\b(top[- ]sell\w*|best[- ]sell\w*|most sold|top product\w*|hot selling|popular)\b/.test(n)) {
+    const counts = {};
+    sales.forEach(s => { counts[s.productId] = (counts[s.productId] || 0) + s.qty; });
+    const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5)
+      .map(([id, qty]) => { const p = prodById[id]; return p ? `${p.name} — ${qty} sold` : null; }).filter(Boolean);
+    return { handled: true, reply: top.length ? '**Top sellers:**\n' + bullet(top) : 'No sales recorded yet.' };
+  }
+
+  // revenue / sales
+  if (/\b(revenue|earn|earning|income|total sales|sales value)\b/.test(n) || /\b(sales today|sold today|today'?s sales)\b/.test(n)) {
+    const revenueAll = sales.reduce((a, s) => a + s.qty * s.price, 0);
+    const today = new Date().toDateString();
+    const revenueToday = sales.filter(s => new Date(s.date).toDateString() === today).reduce((a, s) => a + s.qty * s.price, 0);
+    const soldToday = sales.filter(s => new Date(s.date).toDateString() === today).reduce((a, s) => a + s.qty, 0);
+    return { handled: true, reply: 'Today: **' + fmtMoney(revenueToday) + '** across **' + fmtNum(soldToday) + '** units.\nAll-time revenue: **' + fmtMoney(revenueAll) + '** (' + sales.length + ' transactions).' };
+  }
+
+  // who supplies X (must come before generic supplier listing)
+  const whoSupplies = n.match(/(?:who supplies|supplier of|who is the supplier (?:of|for))\s+(.+)/);
+  if (whoSupplies) {
+    const p = findProduct(whoSupplies[1], products);
+    if (p) {
+      const s = supById[p.supplier];
+      return { handled: true, reply: p.name + ' is supplied by **' + (s ? s.name : 'an unassigned supplier') + '**' + (s && s.phone ? ' (' + s.phone + ')' : '') + '.' };
+    }
+  }
+
+  // suppliers list
+  if (/\b(suppliers?|supplier list)\b/.test(n)) {
+    return { handled: true, reply: suppliers.length ? '**Suppliers (' + suppliers.length + '):**\n' + bullet(suppliers.map(s => `${s.name}${s.city?' · '+s.city:''}${s.phone?' · '+s.phone:''}`)) : 'No suppliers yet.' };
+  }
+
+  // product lookup
+  const asksProduct = /\b(stock|qty|quantity|how many|on hand|left|available|price|cost|reorder|min)\b/.test(n);
+  const pq = q.replace(/^\s*(stock of|price of|cost of|how many|what is|whats|what's|show me|tell me about|about)\s*/i, '');
+  const matched = asksProduct ? findProduct(pq, products) : null;
+  if (matched) {
+    const s = supById[matched.supplier];
+    if (/\bprice\b/.test(n)) return { handled: true, reply: matched.name + ' sells for **' + fmtMoney(matched.price) + '** (cost ' + fmtMoney(matched.cost) + ').' };
+    if (/\bcost\b/.test(n)) return { handled: true, reply: matched.name + ' costs **' + fmtMoney(matched.cost) + '** to buy.' };
+    if (/\b(reorder|min)\b/.test(n)) return { handled: true, reply: matched.name + ' has a reorder level of **' + matched.minStock + ' ' + (matched.unit||'units') + '**; currently ' + matched.qty + '.' };
+    return { handled: true, reply: '**' + matched.name + '** (' + matched.sku + ')\n' + matched.qty + ' ' + (matched.unit||'units') + ' in stock · min ' + matched.minStock + ' · ' + fmtMoney(matched.price) + ' each' + (s ? '\nSupplier: ' + s.name : '') };
+  }
+
+  return { handled: false };
+}
+
+async function askGemini(apiKey, model, systemPrompt, history) {
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(apiKey);
+  const contents = history.filter(m => m.role !== 'system').map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.text }]
+  }));
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents,
+      generationConfig: { temperature: 0.6, maxOutputTokens: 512 }
+    })
+  });
+  if (!res.ok) {
+    let detail = '';
+    try { const j = await res.json(); detail = j.error?.message || ''; } catch (e) {}
+    throw new Error('AI request failed (' + res.status + ')' + (detail ? ': ' + detail : ''));
+  }
+  const j = await res.json();
+  const parts = j.candidates?.[0]?.content?.parts || [];
+  const text = parts.map(p => p.text || '').join('').trim();
+  return text || '(the model returned no text)';
+}
+
+function renderRich(text) {
+  return String(text).split('\n').map((ln, i) => {
+    const parts = ln.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
+    return (
+      <div key={i} className={ln.trim() === '' ? 'h-2' : ''}>
+        {parts.map((p, j) => (p.startsWith('**') && p.endsWith('**'))
+          ? <strong key={j} className="font-semibold">{p.slice(2, -2)}</strong>
+          : <span key={j}>{p.replace(/`/g, '')}</span>)}
+      </div>
+    );
+  });
+}
+
+function Assistant({ products, suppliers, sales, stats, prodById, supById, setView, user }) {
+  const [open, setOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [input, setInput] = useState('');
+  const [typing, setTyping] = useState(false);
+  const [apiKey, setApiKey] = useState(() => { try { return localStorage.getItem(AI_KEY_STORAGE) || ''; } catch (e) { return ''; } });
+  const [model, setModel] = useState(() => { try { return localStorage.getItem(AI_MODEL_STORAGE) || AI_MODEL_DEFAULT; } catch (e) { return AI_MODEL_DEFAULT; } });
+  const [keyDraft, setKeyDraft] = useState(apiKey);
+  const [modelDraft, setModelDraft] = useState(model);
+  const chatKey = 'stockpilot.chat.' + (user?.id || 'anon');
+  const [messages, setMessages] = useState(() => {
+    try { const r = localStorage.getItem(chatKey); if (r) return JSON.parse(r); } catch (e) {}
+    return [];
+  });
+  const scrollRef = useRef(null);
+
+  const ctx = { products, suppliers, sales, stats, prodById, supById };
+
+  const systemPrompt = useMemo(() => {
+    const low = products.filter(p => p.qty <= p.minStock);
+    const value = products.reduce((a, p) => a + p.qty * (p.cost || p.price || 0), 0);
+    const revenue = sales.reduce((a, s) => a + s.qty * s.price, 0);
+    const counts = {};
+    sales.forEach(s => { counts[s.productId] = (counts[s.productId] || 0) + s.qty; });
+    const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 3)
+      .map(([id, q]) => (prodById[id]?.name || '?') + ' (' + q + ')').join(', ');
+    return [
+      'You are StockPilot Assistant, a concise and friendly helper inside a small-business inventory dashboard.',
+      'Reply in short, clear sentences. Use the ₹ symbol for money. If asked to calculate, give the exact result.',
+      'Prefer the live data below when the question is about the user\'s stock.',
+      'Live data — products: ' + products.length + ', suppliers: ' + suppliers.length + ', low-stock items: ' + low.length + ', inventory value: ' + fmtMoney(value) + ', all-time revenue: ' + fmtMoney(revenue) + ', top sellers: ' + (top || 'none') + '.',
+      'Low-stock items: ' + (low.map(p => p.name + ' (' + p.qty + '/' + p.minStock + ')').join(', ') || 'none') + '.'
+    ].join(' ');
+  }, [products, suppliers, sales, prodById]);
+
+  useEffect(() => {
+    if (messages.length === 0) {
+      setMessages([{ role: 'assistant', text: 'Hi ' + ((user?.user_metadata?.full_name || '').split(' ')[0] || 'there') + '! 👋 I\'m your StockPilot assistant — try "low stock", "inventory value", "top sellers", or a calculation like "18% of 3500".' }]);
+    }
+  }, []);
+
+  useEffect(() => { try { localStorage.setItem(chatKey, JSON.stringify(messages)); } catch (e) {} }, [messages]);
+  useEffect(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [messages, typing, open, settingsOpen]);
+
+  const chips = ['Low stock items', 'Inventory value', 'Top sellers', 'Revenue today', 'What is 15% of 2000', 'Open sales'];
+
+  async function send(override) {
+    const text = (override !== undefined ? override : input).trim();
+    if (!text) return;
+    setInput('');
+    const history = [...messages, { role: 'user', text }];
+    setMessages(history);
+
+    const local = assistantLocal(text, ctx);
+    if (local.handled) {
+      if (local.navigate) { try { setView(local.navigate); } catch (e) {} }
+      setMessages(m => [...m, { role: 'assistant', text: local.reply }]);
+      return;
+    }
+    if (apiKey) {
+      setTyping(true);
+      try {
+        const reply = await askGemini(apiKey, model, systemPrompt, history.slice(-10));
+        setMessages(m => [...m, { role: 'assistant', text: reply }]);
+      } catch (e) {
+        setMessages(m => [...m, { role: 'assistant', text: '⚠️ ' + e.message + '\n\nI can still help with stock, sales, suppliers, and calculations.' }]);
+      } finally { setTyping(false); }
+      return;
+    }
+    setMessages(m => [...m, { role: 'assistant', text: 'I\'m not sure about that yet. I can do **calculations** and answer **stock, sales, supplier** questions.\nTip: tap the ⚙️ gear to connect a free AI model for open-ended chat.' }]);
+  }
+
+  function saveSettings() {
+    setApiKey(keyDraft.trim()); setModel(modelDraft.trim() || AI_MODEL_DEFAULT);
+    try {
+      if (keyDraft.trim()) localStorage.setItem(AI_KEY_STORAGE, keyDraft.trim()); else localStorage.removeItem(AI_KEY_STORAGE);
+      localStorage.setItem(AI_MODEL_STORAGE, modelDraft.trim() || AI_MODEL_DEFAULT);
+    } catch (e) {}
+    setSettingsOpen(false);
+  }
+  function removeKey() {
+    setApiKey(''); setKeyDraft('');
+    try { localStorage.removeItem(AI_KEY_STORAGE); } catch (e) {}
+  }
+
+  return (
+    <>
+      {/* Floating button */}
+      <button onClick={() => setOpen(o => !o)} title="Ask StockPilot"
+        className="fixed bottom-5 right-5 z-40 w-14 h-14 rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-2xl flex items-center justify-center hover:scale-105 active:scale-95 transition-transform">
+        {!open && <span className="absolute inset-0 rounded-full bg-brand-500/50 animate-ping"></span>}
+        <i className={`relative fa-solid ${open ? 'fa-xmark' : 'fa-robot'} text-xl`}></i>
+      </button>
+
+      {open && (
+        <div className="fixed bottom-24 right-5 z-40 w-[92vw] max-w-[400px] h-[540px] max-h-[74vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden fade-in">
+          {/* Header */}
+          <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-4 py-3 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 flex items-center justify-center"><i className="fa-solid fa-robot"></i></div>
+            <div className="flex-1 min-w-0">
+              <div className="font-semibold text-sm leading-tight">StockPilot Assistant</div>
+              <div className="text-[11px] text-slate-300 flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${apiKey ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
+                {apiKey ? 'AI model connected' : 'Built-in (offline)'}
+              </div>
+            </div>
+            <button onClick={() => setSettingsOpen(s => !s)} title="AI settings" className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-slate-300"><i className="fa-solid fa-gear text-sm"></i></button>
+            <button onClick={() => setOpen(false)} className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-slate-300"><i className="fa-solid fa-xmark"></i></button>
+          </div>
+
+          {settingsOpen ? (
+            <div className="flex-1 overflow-y-auto scrollbar p-4 space-y-3 text-sm">
+              <div className="font-semibold text-slate-800">Connect an AI model (optional)</div>
+              <p className="text-xs text-slate-500">Calculations, stock, sales and supplier questions work offline. Add a free Google Gemini API key to also chat about anything else.</p>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Gemini API key</label>
+                <input type="password" value={keyDraft} onChange={e => setKeyDraft(e.target.value)} placeholder="AIza..." className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm outline-none focus:ring-2 focus:ring-brand-200" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Model</label>
+                <input value={modelDraft} onChange={e => setModelDraft(e.target.value)} placeholder={AI_MODEL_DEFAULT} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm outline-none focus:ring-2 focus:ring-brand-200" />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={saveSettings} className="flex-1 px-3 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800">Save</button>
+                <button onClick={removeKey} className="px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">Remove key</button>
+              </div>
+              <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="block text-xs text-brand-600 hover:underline">Get a free Gemini API key →</a>
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-2">Your key is stored only in this browser. For a public site, route requests through your own server so the key stays private.</p>
+            </div>
+          ) : (
+            <>
+              <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar p-4 space-y-3 bg-slate-50/60">
+                {messages.map((msg, i) => (
+                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    {msg.role !== 'user' && (
+                      <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-brand-400 to-brand-700 text-white flex items-center justify-center mr-2 shrink-0"><i className="fa-solid fa-robot text-xs"></i></div>
+                    )}
+                    <div className={`max-w-[78%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${msg.role === 'user' ? 'bg-slate-900 text-white rounded-br-sm' : 'bg-white text-slate-700 border border-slate-200 rounded-bl-sm'}`}>
+                      {renderRich(msg.text)}
+                    </div>
+                  </div>
+                ))}
+                {typing && (
+                  <div className="flex justify-start">
+                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-brand-400 to-brand-700 text-white flex items-center justify-center mr-2 shrink-0"><i className="fa-solid fa-robot text-xs"></i></div>
+                    <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-sm px-4 py-3 flex items-center gap-1">
+                      {[0, 1, 2].map(d => <span key={d} className="w-1.5 h-1.5 rounded-full bg-slate-400" style={{ animation: 'dotPulse 1s ease-in-out infinite', animationDelay: (d * 0.15) + 's' }}></span>)}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="px-3 pt-2 pb-1 flex gap-1.5 overflow-x-auto scrollbar border-t border-slate-100 bg-white">
+                {chips.map(c => (
+                  <button key={c} onClick={() => send(c)} className="shrink-0 text-xs px-2.5 py-1.5 rounded-full bg-slate-100 hover:bg-brand-50 hover:text-brand-700 text-slate-600 transition whitespace-nowrap">{c}</button>
+                ))}
+              </div>
+
+              <div className="p-3 bg-white">
+                <div className="flex items-end gap-2">
+                  <textarea rows={1} value={input} onChange={e => setInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                    placeholder="Ask about stock, sales, or a calculation…"
+                    className="flex-1 resize-none px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm outline-none focus:ring-2 focus:ring-brand-200 max-h-24" />
+                  <button onClick={() => send()} disabled={typing || !input.trim()} className="w-10 h-10 shrink-0 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white flex items-center justify-center hover:opacity-90 disabled:opacity-40 transition"><i className="fa-solid fa-paper-plane text-sm"></i></button>
+                </div>
+                <div className="text-[10px] text-slate-400 text-center mt-1.5">StockPilot Assistant · answers from your live data</div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 // ---------- Razorpay Payment Modal ----------
 function PaymentModal({ open, onClose, sb, user }) {
   const [plan, setPlan] = useState('monthly');
@@ -827,6 +1203,8 @@ function App() {
           </div>
         </main>
       </div>
+
+      <Assistant products={products} suppliers={suppliers} sales={sales} stats={stats} prodById={prodById} supById={supById} setView={setView} user={user} />
 
       <PaymentModal open={paymentModal} onClose={()=>setPaymentModal(false)} sb={sbClient} user={user} />
     </div>

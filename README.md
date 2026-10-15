@@ -34,6 +34,20 @@ and replaces the wide-open policies with `auth.uid() = user_id` policies.
 Enable **Google** under Supabase → Authentication → Providers, and add your site
 URL under Authentication → URL Configuration → Redirect URLs.
 
+## AI Assistant
+
+The dashboard includes a floating assistant (bottom-right robot button) that works offline out of the box:
+
+- **Calculations** — `18% of 3500`, `sqrt(144)`, `1250*4`, `5 squared`
+- **Live data** — "low stock", "out of stock", "inventory value", "top sellers", "revenue today", "how many units"
+- **Lookups** — "stock of Basmati Rice", "price of USB-C Cable", "who supplies earbuds"
+- **Navigation** — "open sales", "go to inventory"
+
+For open-ended conversation, tap the ⚙️ gear and paste a free **Google Gemini API key**
+(get one at https://aistudio.google.com/app/apikey). The key is stored only in the browser's
+`localStorage`. For a public deployment, route AI requests through your own server so the key
+stays private.
+
 ## Tech stack (chosen for speed + polished UI)
 
 - **HTML + React 18 (CDN, via Babel standalone)** — component-based stateful UI, zero setup
@@ -52,6 +66,7 @@ shadcn-inspired, responsive, dashboard-grade interface in a single file.
 - **Sales** — record a sale (auto price, stock deduction), filter by period, transaction history, delete-with-stock-restore.
 - **Suppliers** — cards with contacts, edit, delete, and a product drill-down per supplier.
 - **Low stock & reorder** — out/low stock list, average-daily-sales-based reorder suggestions, supplier contact and "add delivered stock".
+- **AI Assistant** — floating chat helper that answers questions from your live data (low stock, inventory value, top sellers, revenue, product/supplier lookups), does calculations ("18% of 3500", "sqrt(144)"), and navigates you around. Optionally connect a free Google Gemini API key (stored only in the browser) for open-ended chat.
 - **Data** — export/import JSON, reset to sample data.
 
 ## Files
