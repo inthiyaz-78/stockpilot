@@ -48,6 +48,22 @@ provider, "member since", "last seen" and the account ID — plus a sign-out but
 Enable **Google** under Supabase → Authentication → Providers, and add your site
 URL under Authentication → URL Configuration → Redirect URLs.
 
+## Payments (Upgrade to Pro)
+
+Two options in the **Pro** modal:
+
+1. **Direct UPI (default, no KYC / no PAN).** Enter your UPI ID once in the modal (stored in
+   `localStorage` as `stockpilot.upi.id`, or set the `UPI_ID` constant in `index.html`). The app then
+   shows a **QR code** and a **"Pay ₹… via UPI app"** button that opens GPay/PhonePe/Paytm with the
+   amount pre-filled (`upi://pay?…`). Money goes straight to your UPI — no gateway, no PAN, no GST.
+   Trade-off: there's no automatic webhook, so a click on **"I've paid"** just shows a thank-you
+   (mark the plan active manually).
+2. **Card via Razorpay (test mode).** Paste a test key into `RAZORPAY_KEY_ID` in `index.html`
+   (e.g. `rzp_test_…`). Test keys need **no KYC/PAN**; use Razorpay test cards.
+
+> Going **live** with any RBI-regulated gateway (Razorpay/Cashfree/PayU) requires KYC incl. PAN —
+> that is mandatory. Direct UPI is the way to take real money with no PAN.
+
 ## AI Assistant
 
 The dashboard includes a floating assistant (bottom-right robot button) that works offline out of the box:

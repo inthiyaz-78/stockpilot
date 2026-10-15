@@ -24,6 +24,7 @@ tailwind.config = {
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
 <style>
   body { font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
@@ -80,6 +81,10 @@ const SB_CONFIG_KEY = 'stockpilot.supabase.v1';
 const SUPABASE_URL = 'https://ybfvkxbavmfndktpwrxz.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InliZnZreGJhdm1mbmRrdHB3cnh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjU3ODgsImV4cCI6MjEwNzY0MTc4OH0.7qZ3utdkR54xGvi8qDWF6PB4j2yo850kbkha5TbN1Rc';
 const RAZORPAY_KEY_ID = 'YOUR_RAZORPAY_KEY_ID'; // e.g. rzp_test_1DP5mmOlF5G5ag
+// ===== DIRECT UPI (no KYC / no PAN needed to accept payments) =====
+// Put YOUR UPI ID here to enable instant UPI payments (QR + app deep-link).
+const UPI_ID = 'yourname@okhdfcbank';   // e.g. 9876543210@ybl  or  name@okhdfcbank
+const UPI_NAME = 'StockPilot';          // shown in the payer's UPI app
 // OAuth redirect: automatically uses whatever domain the app is running on
 const REDIRECT_URL = window.location.origin + window.location.pathname;
 // =================================================================
@@ -803,16 +808,54 @@ function Assistant({ products, suppliers, sales, stats, prodById, supById, setVi
   );
 }
 
-// ---------- Razorpay Payment Modal ----------
+// ---------- Payment Modal (Direct UPI + Razorpay card) ----------
+function upiLink(upiId, amount, note){
+  const q = (s)=>encodeURIComponent(s);
+  return 'upi://pay?pa='+q(upiId)+'&pn='+q(UPI_NAME)+'&am='+amount+'&cu=INR&tn='+q(note)+'&tr=SP'+Date.now();
+}
+const UPI_ID_RE = /^[a-zA-Z0-9._-]{2,}@[a-zA-Z]{2,}$/;
 function PaymentModal({ open, onClose, sb, user }) {
   const [plan, setPlan] = useState('monthly');
+  const [method, setMethod] = useState('upi');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [paid, setPaid] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [upiId, setUpiId] = useState(() => {
+    try { const saved = (localStorage.getItem('stockpilot.upi.id') || '').trim(); if (saved) return saved; } catch (e) {}
+    return (UPI_ID && !/^your/i.test(UPI_ID)) ? UPI_ID : '';
+  });
+  const [upiDraft, setUpiDraft] = useState('');
+  const qrRef = useRef(null);
 
   const plans = {
     monthly: { name: 'Monthly', price: 499, period: '/mo' },
     yearly: { name: 'Yearly', price: 4999, period: '/yr' }
   };
+  const amount = plans[plan].price;
+  const upiReady = UPI_ID_RE.test(upiId);
+
+  // Reset transient state each time the modal opens.
+  useEffect(() => { if (open) { setPaid(false); setError(''); } }, [open]);
+
+  // Render the UPI QR for the currently selected plan.
+  useEffect(() => {
+    if (!open || method !== 'upi') return;
+    const el = qrRef.current;
+    if (!el) return;
+    el.innerHTML = '';
+    if (!upiReady) return;
+    const link = upiLink(upiId, amount, 'StockPilot Pro ' + plan);
+    if (window.QRCode) {
+      try {
+        new window.QRCode(el, { text: link, width: 168, height: 168, colorDark: '#0f172a', colorLight: '#ffffff', correctLevel: window.QRCode.CorrectLevel.M });
+      } catch (e) {
+        el.innerHTML = '<div style="font-size:11px;color:#94a3b8;padding:16px">QR unavailable — use the button below</div>';
+      }
+    } else {
+      el.innerHTML = '<div style="font-size:11px;color:#94a3b8;padding:16px">QR library not loaded — use the button below</div>';
+    }
+  }, [open, method, plan, amount, upiId, upiReady]);
 
   async function pay() {
     if (!RAZORPAY_KEY_ID || RAZORPAY_KEY_ID === 'YOUR_RAZORPAY_KEY_ID') {
@@ -821,7 +864,7 @@ function PaymentModal({ open, onClose, sb, user }) {
     }
     setLoading(true); setError('');
     try {
-      const amt = plans[plan].price * 100;
+      const amt = amount * 100;
       const options = {
         key: RAZORPAY_KEY_ID,
         amount: amt,
@@ -844,39 +887,102 @@ function PaymentModal({ open, onClose, sb, user }) {
     } catch (e) { setError(e.message); setLoading(false); }
   }
 
+  function openUpi(){
+    try { window.location.href = upiLink(upiId, amount, 'StockPilot Pro ' + plan); }
+    catch (e) { setError('Could not open a UPI app on this device.'); }
+  }
+  function copyLink(){
+    try { navigator.clipboard.writeText(upiLink(upiId, amount, 'StockPilot Pro ' + plan)); setCopied(true); setTimeout(()=>setCopied(false), 1500); } catch(e){}
+  }
+  function saveUpiId(){
+    const v = (upiDraft || '').trim();
+    if (!UPI_ID_RE.test(v)) { setError('Enter a valid UPI ID, e.g. 9876543210@ybl'); return; }
+    setError('');
+    setUpiId(v);
+    try { localStorage.setItem('stockpilot.upi.id', v); } catch (e) {}
+  }
+
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 fade-in" onClick={onClose}>
       <div className="absolute inset-0 bg-slate-900/40 modal-backdrop"></div>
-      <div className="relative bg-white rounded-2xl shadow-soft w-full max-w-md" onClick={e=>e.stopPropagation()}>
+      <div className="relative bg-white rounded-2xl shadow-soft w-full max-w-md max-h-[92vh] overflow-auto" onClick={e=>e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <h3 className="text-lg font-semibold text-slate-800">Upgrade to Pro</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400"><i className="fa-solid fa-xmark"></i></button>
         </div>
-        <div className="p-6">
-          <div className="grid grid-cols-2 gap-3 mb-5">
-            {Object.entries(plans).map(([k, p]) => (
-              <button key={k} onClick={()=>setPlan(k)} className={`p-4 rounded-xl border-2 text-center transition ${plan===k?'border-brand-500 bg-brand-50':'border-slate-200 hover:border-slate-300'}`}>
-                <div className="text-sm font-medium text-slate-700">{p.name}</div>
-                <div className="text-xl font-bold text-slate-800 mt-1">₹{p.price}<span className="text-xs text-slate-400 font-normal">{p.period}</span></div>
+
+        {paid ? (
+          <div className="p-6 text-center">
+            <div className="w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-600 flex items-center justify-center text-2xl mx-auto mb-3"><i className="fa-solid fa-check"></i></div>
+            <div className="font-semibold text-slate-800">Thanks for your payment!</div>
+            <p className="text-sm text-slate-500 mt-1">We'll verify the UPI transfer of <span className="font-medium text-slate-700">₹{amount}</span> and activate your Pro plan shortly.</p>
+            <Button className="w-full mt-5 justify-center" onClick={onClose}>Done</Button>
+          </div>
+        ) : (
+          <div className="p-6">
+            <div className="grid grid-cols-2 gap-3 mb-5">
+              {Object.entries(plans).map(([k, p]) => (
+                <button key={k} onClick={()=>setPlan(k)} className={`p-4 rounded-xl border-2 text-center transition ${plan===k?'border-brand-500 bg-brand-50':'border-slate-200 hover:border-slate-300'}`}>
+                  <div className="text-sm font-medium text-slate-700">{p.name}</div>
+                  <div className="text-xl font-bold text-slate-800 mt-1">₹{p.price}<span className="text-xs text-slate-400 font-normal">{p.period}</span></div>
+                </button>
+              ))}
+            </div>
+
+            <div className="bg-slate-50 rounded-xl p-4 mb-4 text-sm text-slate-600">
+              <div className="font-medium text-slate-700 mb-2">Pro features</div>
+              <ul className="space-y-1.5">
+                <li><i className="fa-solid fa-check text-emerald-500 mr-2"></i>Unlimited products &amp; suppliers</li>
+                <li><i className="fa-solid fa-check text-emerald-500 mr-2"></i>Demand forecasting &amp; reports</li>
+                <li><i className="fa-solid fa-check text-emerald-500 mr-2"></i>Multi-shop &amp; staff roles</li>
+                <li><i className="fa-solid fa-check text-emerald-500 mr-2"></i>Priority support</li>
+              </ul>
+            </div>
+
+            {/* Payment method selector */}
+            <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl mb-4">
+              <button onClick={()=>setMethod('upi')} className={`py-2 rounded-lg text-sm font-medium transition ${method==='upi'?'bg-white shadow-sm text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
+                <i className="fa-solid fa-indian-rupee-sign mr-1.5"></i>UPI
               </button>
-            ))}
+              <button onClick={()=>setMethod('card')} className={`py-2 rounded-lg text-sm font-medium transition ${method==='card'?'bg-white shadow-sm text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
+                <i className="fa-regular fa-credit-card mr-1.5"></i>Card
+              </button>
+            </div>
+
+            {error && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mb-3">{error}</div>}
+
+            {method === 'upi' ? (
+              upiReady ? (
+                <div className="text-center">
+                  <div ref={qrRef} className="mx-auto w-[168px] h-[168px] flex items-center justify-center bg-white rounded-xl border border-slate-200 overflow-hidden"></div>
+                  <p className="text-xs text-slate-500 mt-3">Scan with any UPI app — GPay, PhonePe, Paytm</p>
+                  <div className="text-sm text-slate-600 mt-1">Paying <span className="font-semibold text-slate-800">₹{amount}</span> to <span className="font-medium">{UPI_NAME}</span></div>
+                  <div className="text-xs text-slate-400 mt-0.5">UPI ID: {upiId} <button onClick={()=>{ setUpiDraft(upiId); setUpiId(''); }} className="text-brand-500 hover:text-brand-600 ml-1">change</button></div>
+                  <Button className="w-full mt-4 justify-center" onClick={openUpi}><i className="fa-solid fa-mobile-screen-button"></i>Pay ₹{amount} via UPI app</Button>
+                  <div className="flex items-center justify-center gap-4 mt-3">
+                    <button onClick={copyLink} className="text-xs text-slate-500 hover:text-slate-700">{copied ? 'Link copied!' : 'Copy payment link'}</button>
+                    <button onClick={()=>setPaid(true)} className="text-xs text-brand-600 hover:text-brand-700 font-medium">I've paid</button>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-3"><i className="fa-solid fa-shield-halved mr-1"></i>Direct UPI — no card, no KYC needed</p>
+                </div>
+              ) : (
+                <div>
+                  <Input label="Your UPI ID (to receive payments)" placeholder="e.g. 9876543210@ybl" value={upiDraft} onChange={e=>setUpiDraft(e.target.value)} />
+                  <Button className="w-full justify-center" onClick={saveUpiId}><i className="fa-solid fa-check"></i>Save &amp; show QR</Button>
+                  <p className="text-[11px] text-slate-400 mt-3 text-center"><i className="fa-solid fa-shield-halved mr-1"></i>Stored only in your browser. No PAN / KYC needed.</p>
+                </div>
+              )
+            ) : (
+              <>
+                <Button onClick={pay} disabled={loading} className="w-full justify-center">
+                  {loading ? 'Opening checkout...' : <><i className="fa-solid fa-lock"></i>Pay ₹{amount}</>}
+                </Button>
+                <p className="text-xs text-slate-400 text-center mt-3">Test mode — use Razorpay test cards</p>
+              </>
+            )}
           </div>
-          <div className="bg-slate-50 rounded-xl p-4 mb-4 text-sm text-slate-600">
-            <div className="font-medium text-slate-700 mb-2">Pro features</div>
-            <ul className="space-y-1.5">
-              <li><i className="fa-solid fa-check text-emerald-500 mr-2"></i>Unlimited products & suppliers</li>
-              <li><i className="fa-solid fa-check text-emerald-500 mr-2"></i>Demand forecasting & reports</li>
-              <li><i className="fa-solid fa-check text-emerald-500 mr-2"></i>Multi-shop & staff roles</li>
-              <li><i className="fa-solid fa-check text-emerald-500 mr-2"></i>Priority support</li>
-            </ul>
-          </div>
-          {error && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mb-4">{error}</div>}
-          <Button onClick={pay} disabled={loading} className="w-full">
-            {loading ? 'Opening checkout...' : <><i className="fa-solid fa-lock"></i>Pay ₹{plans[plan].price}</>}
-          </Button>
-          <p className="text-xs text-slate-400 text-center mt-3">Test mode — use Razorpay test cards</p>
-        </div>
+        )}
       </div>
     </div>
   );
