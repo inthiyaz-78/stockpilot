@@ -30,6 +30,13 @@ and replaces the wide-open policies with `auth.uid() = user_id` policies.
 > Without this migration the app will show a connection error, because inserts
 > include the new `user_id` column.
 
+### User details table (profiles)
+Run `supabase-profiles.sql` once. It creates a `public.profiles` table (one row per
+logged-in user) with Row Level Security so **each user can only read/write their own
+row**, plus a trigger that auto-creates the row on sign-up. The app also upserts the
+profile on every login — and if the table isn't set up yet, the app keeps working
+(the sync failure is ignored).
+
 ### Google login
 Enable **Google** under Supabase → Authentication → Providers, and add your site
 URL under Authentication → URL Configuration → Redirect URLs.

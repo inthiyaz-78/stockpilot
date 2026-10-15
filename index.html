@@ -936,6 +936,35 @@ function App() {
     return () => { cancelled = true; };
   }, [sbClient, user?.id]);
 
+  // Sync the signed-in user's details into the `profiles` table.
+  // Fully guarded: if the table or policies aren't set up yet, the app keeps working.
+  useEffect(() => {
+    const sb = sbClient, u = user;
+    if (!sb || !u || !u.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const md = u.user_metadata || {};
+        const am = u.app_metadata || {};
+        const row = {
+          id: u.id,
+          email: u.email || null,
+          full_name: md.full_name || md.name || null,
+          avatar_url: md.avatar_url || md.picture || null,
+          provider: am.provider || md.provider || null,
+          last_seen: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        const { error } = await sb.from('profiles').upsert(row, { onConflict: 'id' });
+        if (error && !cancelled) console.warn('profiles sync skipped:', error.message);
+      } catch (e) {
+        // Never let profile syncing break the app.
+        console.warn('profiles sync skipped:', (e && e.message) || e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sbClient, user]);
+
   const products = data.products;
   const suppliers = data.suppliers;
   const sales = data.sales;
