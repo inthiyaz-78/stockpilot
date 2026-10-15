@@ -234,20 +234,37 @@ function buildSeed(userId){
 }
 
 async function fetchAllFromSb(sb, userId){
-  const [prods,sups,sales] = await Promise.all([
-    sb.from('products').select('*').eq('user_id', userId),
-    sb.from('suppliers').select('*').eq('user_id', userId),
-    sb.from('sales').select('*').eq('user_id', userId)
-  ]);
-  if (prods.error || sups.error || sales.error) {
-    console.error('Supabase fetch error', prods.error||sups.error||sales.error);
-    return null;
+  // Per-user scope first (requires the multi-user migration). Falls back gracefully
+  // if the user_id column / policies aren't in place yet, so the app never hangs.
+  async function run(uid){
+    const sc = (q) => (uid ? q.eq('user_id', uid) : q);
+    const [prods,sups,sales] = await Promise.all([
+      sc(sb.from('products').select('*')),
+      sc(sb.from('suppliers').select('*')),
+      sc(sb.from('sales').select('*'))
+    ]);
+    const err = prods.error || sups.error || sales.error;
+    if (err) return { error: err };
+    return {
+      scoped: !!uid,
+      products: (prods.data||[]).map(dbToProduct),
+      suppliers: (sups.data||[]).map(dbToSupplier),
+      sales: (sales.data||[]).map(dbToSale)
+    };
   }
-  return {
-    products: (prods.data||[]).map(dbToProduct),
-    suppliers: (sups.data||[]).map(dbToSupplier),
-    sales: (sales.data||[]).map(dbToSale)
-  };
+
+  let r;
+  try { r = await run(userId); }
+  catch (e) { r = { error: e }; }
+
+  if (r.error) {
+    console.warn('per-user fetch unavailable, retrying unfiltered:', r.error.message || r.error);
+    try { r = await run(null); }
+    catch (e) { r = { error: e }; }
+    if (r.error) { console.error('Supabase fetch error', r.error); return null; }
+  }
+  if (!r.scoped) console.warn('Running unfiltered — run supabase-migration-multiuser.sql to isolate each account.');
+  return { scoped: r.scoped, products: r.products, suppliers: r.suppliers, sales: r.sales };
 }
 async function upsertRow(sb, table, payload){ const {error}=await sb.from(table).upsert(payload); if (error) console.error('upsert error',table,error); }
 async function deleteRow(sb, table, id){ const {error}=await sb.from(table).delete().eq('id',id); if (error) console.error('delete error',table,error); }
@@ -913,27 +930,32 @@ function App() {
     const cached = loadCache(uidUser);
     if (cached) setData(cached);
     setSbStatus('connecting');
+    // Safety net: never leave the indicator stuck on "Connecting…".
+    const guard = setTimeout(() => { if (!cancelled) setSbStatus(s => (s === 'connecting' ? 'error' : s)); }, 8000);
     (async () => {
       try {
         let loaded = await fetchAllFromSb(sb, uidUser);
         if (cancelled) return;
         if (!loaded) { setSbStatus('error'); return; }
-        // New account → seed its own private sample data
-        if (loaded.products.length === 0 && loaded.suppliers.length === 0 && loaded.sales.length === 0) {
+        // Connected as soon as we can read this user's rows.
+        setSbStatus(loaded.scoped === false ? 'setup' : 'connected');
+        // New account → seed sample data in batched writes when the user has no stock/sales yet.
+        if (loaded.products.length === 0 && loaded.sales.length === 0) {
           const seed = buildSeed(uidUser);
-          for (const s of seed.suppliers) { if (cancelled) return; await upsertRow(sb, 'suppliers', supplierToDb(s, uidUser)); }
-          for (const p of seed.products) { if (cancelled) return; await upsertRow(sb, 'products', productToDb(p, uidUser)); }
-          for (const s of seed.sales) { if (cancelled) return; await upsertRow(sb, 'sales', saleToDb(s, uidUser)); }
-          loaded = { products: seed.products, suppliers: seed.suppliers, sales: seed.sales };
+          // If user_id isn't available yet (pre-migration), omit it so seeding can't fail.
+          const payload = (row) => { if (loaded.scoped !== false) return row; const c = { ...row }; delete c.user_id; return c; };
+          await upsertRow(sb, 'suppliers', seed.suppliers.map(s => payload(supplierToDb(s, uidUser))));
+          await upsertRow(sb, 'products', seed.products.map(p => payload(productToDb(p, uidUser))));
+          await upsertRow(sb, 'sales', seed.sales.map(s => payload(saleToDb(s, uidUser))));
+          loaded = { scoped: loaded.scoped, products: seed.products, suppliers: [...loaded.suppliers, ...seed.suppliers], sales: seed.sales };
         }
         if (cancelled) return;
         setData(loaded);
-        setSbStatus('connected');
       } catch (e) {
         if (!cancelled) setSbStatus('error');
       }
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearTimeout(guard); };
   }, [sbClient, user?.id]);
 
   // Sync the signed-in user's details into the `profiles` table.
@@ -998,6 +1020,13 @@ function App() {
   ];
 
   function crumb() { return nav.find(n=>n.id===view)?.label || 'Dashboard'; }
+
+  // Minimal, accurate connection indicator
+  const sbInfo = sbStatus === 'connected' ? { dot: 'bg-emerald-500', text: 'Synced', cls: 'text-emerald-400', tip: 'Synced with your Supabase account' }
+    : sbStatus === 'setup' ? { dot: 'bg-amber-500', text: 'Setup needed', cls: 'text-amber-300', tip: 'Run supabase-migration-multiuser.sql so each account is isolated' }
+    : sbStatus === 'error' ? { dot: 'bg-rose-500', text: 'Sync failed', cls: 'text-rose-300', tip: 'Could not reach Supabase' }
+    : sbStatus === 'local' ? { dot: 'bg-slate-400', text: 'Local only', cls: 'text-slate-400', tip: 'Supabase not loaded — using local storage' }
+    : { dot: 'bg-amber-500', text: 'Connecting…', cls: 'text-amber-300', tip: 'Connecting to Supabase' };
 
   // data mutators
   const api = {
@@ -1098,9 +1127,9 @@ function App() {
           await sb.from('products').delete().eq('user_id', u);
           await sb.from('suppliers').delete().eq('user_id', u);
           const seed = buildSeed(u);
-          for (const s of seed.suppliers) await upsertRow(sb, 'suppliers', supplierToDb(s, u));
-          for (const p of seed.products) await upsertRow(sb, 'products', productToDb(p, u));
-          for (const s of seed.sales) await upsertRow(sb, 'sales', saleToDb(s, u));
+          await upsertRow(sb, 'suppliers', seed.suppliers.map(s => supplierToDb(s, u)));
+          await upsertRow(sb, 'products', seed.products.map(p => productToDb(p, u)));
+          await upsertRow(sb, 'sales', seed.sales.map(s => saleToDb(s, u)));
           setData({ products: seed.products, suppliers: seed.suppliers, sales: seed.sales });
         } catch (e) { alert('Reset failed: ' + e.message); }
       } else {
@@ -1112,9 +1141,9 @@ function App() {
       if (!sb || !u) { alert('Sign in first.'); return; }
       if (!confirm('Push current local data to Supabase (upsert)?')) return;
       try {
-        for (const s of data.suppliers) await upsertRow(sb,'suppliers',supplierToDb(s, u));
-        for (const p of data.products) await upsertRow(sb,'products',productToDb(p, u));
-        for (const s of data.sales) await upsertRow(sb,'sales',saleToDb(s, u));
+        await upsertRow(sb,'suppliers', data.suppliers.map(s => supplierToDb(s, u)));
+        await upsertRow(sb,'products', data.products.map(p => productToDb(p, u)));
+        await upsertRow(sb,'sales', data.sales.map(s => saleToDb(s, u)));
         alert('Pushed to Supabase successfully.');
       } catch (e) { alert('Push failed: ' + e.message); }
     },
@@ -1170,9 +1199,9 @@ function App() {
           ))}
         </nav>
         <div className="px-4 py-4 border-t border-white/5 space-y-2">
-          <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs">
-            <span className={`w-2 h-2 rounded-full ${sbStatus==='connected'?'bg-emerald-500':'bg-amber-500'}`}></span>
-            <span className="text-slate-400">{sbStatus==='connected'?'Supabase connected':'Connecting...'}</span>
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs" title={sbInfo.tip}>
+            <span className={`w-2 h-2 rounded-full ${sbInfo.dot}`}></span>
+            <span className={sbInfo.cls}>{sbInfo.text}</span>
           </div>
           <button onClick={api.pushToSupabase} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-slate-300 hover:bg-white/5 transition"><i className="fa-solid fa-cloud-arrow-up"></i>Push local data to DB</button>
           <button onClick={api.exportData} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-slate-300 hover:bg-white/5 transition"><i className="fa-solid fa-download"></i>Export data (JSON)</button>
