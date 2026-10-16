@@ -1321,58 +1321,180 @@ function SaleForm({
   onSave,
   onCancel
 }) {
-  const [productId, setProductId] = useState(products[0]?.id || '');
-  const [qty, setQty] = useState(1);
-  const [price, setPrice] = useState(products[0]?.price || 0);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 16));
-  const sel = products.find(p => p.id === productId);
-  useEffect(() => {
-    if (sel) setPrice(sel.price);
-  }, [productId]);
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Select, {
-    label: "Product",
-    value: productId,
-    onChange: e => setProductId(e.target.value)
-  }, products.map(p => /*#__PURE__*/React.createElement("option", {
-    key: p.id,
-    value: p.id,
-    disabled: p.qty <= 0
-  }, p.name, " \u2014 ", p.qty, " ", p.unit, " in stock", p.qty <= 0 ? ' (out)' : ''))), /*#__PURE__*/React.createElement("div", {
-    className: "grid grid-cols-2 gap-3"
+  const [rows, setRows] = useState(() => {
+    // Start with first 5 products pre-loaded for quick selection
+    return products.slice(0, 5).map((p, i) => ({
+      productId: p.id,
+      checked: false,
+      qty: 1,
+      price: p.price
+    }));
+  });
+  const availableProducts = products.filter(p => p.qty > 0);
+  const selectedCount = rows.filter(r => r.checked).length;
+  function toggleRow(idx) {
+    setRows(rs => rs.map((r, i) => i === idx ? {
+      ...r,
+      checked: !r.checked
+    } : r));
+  }
+  function toggleAll() {
+    const allChecked = rows.every(r => r.checked);
+    setRows(rs => rs.map(r => ({
+      ...r,
+      checked: !allChecked
+    })));
+  }
+  function updateRow(idx, field, val) {
+    setRows(rs => rs.map((r, i) => i === idx ? {
+      ...r,
+      [field]: val
+    } : r));
+  }
+  function removeRow(idx) {
+    setRows(rs => rs.filter((_, i) => i !== idx));
+  }
+  function addRow() {
+    const unused = products.find(p => !rows.some(r => r.productId === p.id) && p.qty > 0);
+    if (unused) setRows(rs => [...rs, {
+      productId: unused.id,
+      checked: true,
+      qty: 1,
+      price: unused.price
+    }]);else if (rows.length < products.length) {
+      const next = products.find(p => !rows.some(r => r.productId === p.id));
+      if (next) setRows(rs => [...rs, {
+        productId: next.id,
+        checked: true,
+        qty: 1,
+        price: next.price
+      }]);
+    }
+  }
+  function handleSubmit() {
+    const selected = rows.filter(r => r.checked && r.qty > 0);
+    if (selected.length === 0) return;
+    selected.forEach(r => {
+      onSave({
+        productId: r.productId,
+        qty: Number(r.qty),
+        price: Number(r.price),
+        date: new Date(date).toISOString()
+      });
+    });
+  }
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: toggleAll,
+    className: "flex items-center gap-1.5 text-xs text-slate-500 hover:text-brand-600 transition"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: `fa-solid ${rows.length > 0 && rows.every(r => r.checked) ? 'fa-square-check' : 'fa-square'} text-brand-500`
+  }), "Select all"), /*#__PURE__*/React.createElement("span", {
+    className: "text-xs text-slate-400"
+  }, "\xB7"), /*#__PURE__*/React.createElement("span", {
+    className: "text-xs font-medium text-brand-600"
+  }, selectedCount, " selected")), /*#__PURE__*/React.createElement("button", {
+    onClick: addRow,
+    className: "text-xs text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1 transition"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fa-solid fa-plus"
+  }), " Add row")), /*#__PURE__*/React.createElement("div", {
+    className: "border border-slate-200 rounded-xl overflow-hidden"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "overflow-x-auto"
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "w-full text-sm"
+  }, /*#__PURE__*/React.createElement("thead", {
+    className: "bg-slate-50 text-slate-500 text-xs uppercase tracking-wide"
+  }, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
+    className: "text-left px-3 py-2.5 font-semibold w-10"
+  }), /*#__PURE__*/React.createElement("th", {
+    className: "text-left px-3 py-2.5 font-semibold"
+  }, "Product"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right px-3 py-2.5 font-semibold w-24"
+  }, "In stock"), /*#__PURE__*/React.createElement("th", {
+    className: "text-center px-3 py-2.5 font-semibold w-20"
+  }, "Qty"), /*#__PURE__*/React.createElement("th", {
+    className: "text-center px-3 py-2.5 font-semibold w-28"
+  }, "Price \u20B9"), /*#__PURE__*/React.createElement("th", {
+    className: "px-3 py-2.5 w-10"
+  }))), /*#__PURE__*/React.createElement("tbody", null, rows.map((r, idx) => {
+    const p = products.find(x => x.id === r.productId);
+    if (!p) return null;
+    return /*#__PURE__*/React.createElement("tr", {
+      key: idx,
+      className: `border-t border-slate-100 transition ${r.checked ? 'bg-brand-50/40' : 'bg-white'}`
+    }, /*#__PURE__*/React.createElement("td", {
+      className: "px-3 py-2"
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "checkbox",
+      checked: r.checked,
+      onChange: () => toggleRow(idx),
+      className: "w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer"
+    })), /*#__PURE__*/React.createElement("td", {
+      className: "px-3 py-2"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "font-medium text-slate-800 text-sm"
+    }, p.name), /*#__PURE__*/React.createElement("div", {
+      className: "text-xs text-slate-400"
+    }, p.sku)), /*#__PURE__*/React.createElement("td", {
+      className: "px-3 py-2 text-right text-slate-500 text-xs"
+    }, fmtNum(p.qty), " ", p.unit), /*#__PURE__*/React.createElement("td", {
+      className: "px-3 py-2"
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "number",
+      min: "1",
+      max: p.qty,
+      value: r.qty,
+      onChange: e => updateRow(idx, 'qty', e.target.value),
+      className: "w-16 px-2 py-1.5 rounded-lg border border-slate-200 bg-white text-center text-sm focus:border-brand-400 focus:outline-none"
+    })), /*#__PURE__*/React.createElement("td", {
+      className: "px-3 py-2"
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "number",
+      min: "0",
+      value: r.price,
+      onChange: e => updateRow(idx, 'price', e.target.value),
+      className: "w-20 px-2 py-1.5 rounded-lg border border-slate-200 bg-white text-center text-sm focus:border-brand-400 focus:outline-none"
+    })), /*#__PURE__*/React.createElement("td", {
+      className: "px-3 py-2 text-center"
+    }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => removeRow(idx),
+      className: "w-7 h-7 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-500 transition"
+    }, /*#__PURE__*/React.createElement("i", {
+      className: "fa-solid fa-xmark text-xs"
+    }))));
+  })))), rows.length === 0 && /*#__PURE__*/React.createElement("div", {
+    className: "py-8 text-center text-sm text-slate-400"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fa-solid fa-inbox text-2xl mb-2 block"
+  }), "No rows. Click \"Add row\" to start.")), /*#__PURE__*/React.createElement("div", {
+    className: "mt-4"
   }, /*#__PURE__*/React.createElement(Input, {
-    label: "Quantity",
-    type: "number",
-    min: "1",
-    max: sel?.qty,
-    value: qty,
-    onChange: e => setQty(e.target.value)
-  }), /*#__PURE__*/React.createElement(Input, {
-    label: "Unit price (\u20B9)",
-    type: "number",
-    value: price,
-    onChange: e => setPrice(e.target.value)
-  })), /*#__PURE__*/React.createElement(Input, {
     label: "Date & time",
     type: "datetime-local",
     value: date,
     onChange: e => setDate(e.target.value)
-  }), sel && /*#__PURE__*/React.createElement("div", {
-    className: "text-xs text-slate-500 mb-3"
-  }, "Available: ", /*#__PURE__*/React.createElement("b", null, sel.qty, " ", sel.unit), " \xB7 Min stock ", sel.minStock), /*#__PURE__*/React.createElement("div", {
-    className: "flex justify-end gap-2 mt-2"
+  })), selectedCount > 0 && /*#__PURE__*/React.createElement("div", {
+    className: "mt-3 p-3 rounded-xl bg-brand-50 border border-brand-100 text-xs text-brand-700"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fa-solid fa-circle-info mr-1"
+  }), " ", selectedCount, " item", selectedCount !== 1 ? 's' : '', " will be recorded with stock auto-deducted."), /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-end gap-2 mt-4"
   }, /*#__PURE__*/React.createElement(Button, {
     variant: "secondary",
     onClick: onCancel
   }, "Cancel"), /*#__PURE__*/React.createElement(Button, {
-    onClick: () => onSave({
-      productId,
-      qty: Number(qty),
-      price: Number(price),
-      date: new Date(date).toISOString()
-    })
+    onClick: handleSubmit,
+    disabled: selectedCount === 0,
+    className: "magnetic ripple"
   }, /*#__PURE__*/React.createElement("i", {
     className: "fa-solid fa-check"
-  }), "Record")));
+  }), " Record ", selectedCount > 0 ? `${selectedCount} item${selectedCount !== 1 ? 's' : ''}` : 'sale')));
 }
 function Suppliers({
   suppliers,

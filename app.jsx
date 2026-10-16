@@ -449,26 +449,131 @@ function Sales({ products, sales, prodById, api }) {
 }
 
 function SaleForm({ products, onSave, onCancel }) {
-  const [productId, setProductId] = useState(products[0]?.id || '');
-  const [qty, setQty] = useState(1);
-  const [price, setPrice] = useState(products[0]?.price || 0);
   const [date, setDate] = useState(new Date().toISOString().slice(0,16));
-  const sel = products.find(p=>p.id===productId);
-  useEffect(() => { if (sel) setPrice(sel.price); }, [productId]);
+  const [rows, setRows] = useState(() => {
+    // Start with first 5 products pre-loaded for quick selection
+    return products.slice(0, 5).map((p, i) => ({
+      productId: p.id,
+      checked: false,
+      qty: 1,
+      price: p.price
+    }));
+  });
+
+  const availableProducts = products.filter(p => p.qty > 0);
+  const selectedCount = rows.filter(r => r.checked).length;
+
+  function toggleRow(idx) {
+    setRows(rs => rs.map((r, i) => i === idx ? {...r, checked: !r.checked} : r));
+  }
+  function toggleAll() {
+    const allChecked = rows.every(r => r.checked);
+    setRows(rs => rs.map(r => ({...r, checked: !allChecked})));
+  }
+  function updateRow(idx, field, val) {
+    setRows(rs => rs.map((r, i) => i === idx ? {...r, [field]: val} : r));
+  }
+  function removeRow(idx) {
+    setRows(rs => rs.filter((_, i) => i !== idx));
+  }
+  function addRow() {
+    const unused = products.find(p => !rows.some(r => r.productId === p.id) && p.qty > 0);
+    if (unused) setRows(rs => [...rs, { productId: unused.id, checked: true, qty: 1, price: unused.price }]);
+    else if (rows.length < products.length) {
+      const next = products.find(p => !rows.some(r => r.productId === p.id));
+      if (next) setRows(rs => [...rs, { productId: next.id, checked: true, qty: 1, price: next.price }]);
+    }
+  }
+
+  function handleSubmit() {
+    const selected = rows.filter(r => r.checked && r.qty > 0);
+    if (selected.length === 0) return;
+    selected.forEach(r => {
+      onSave({ productId: r.productId, qty: Number(r.qty), price: Number(r.price), date: new Date(date).toISOString() });
+    });
+  }
+
   return (
     <div>
-      <Select label="Product" value={productId} onChange={e=>setProductId(e.target.value)}>
-        {products.map(p=> <option key={p.id} value={p.id} disabled={p.qty<=0}>{p.name} — {p.qty} {p.unit} in stock{p.qty<=0?' (out)':''}</option>)}
-      </Select>
-      <div className="grid grid-cols-2 gap-3">
-        <Input label="Quantity" type="number" min="1" max={sel?.qty} value={qty} onChange={e=>setQty(e.target.value)} />
-        <Input label="Unit price (₹)" type="number" value={price} onChange={e=>setPrice(e.target.value)} />
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <button onClick={toggleAll} className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-brand-600 transition">
+            <i className={`fa-solid ${rows.length>0 && rows.every(r=>r.checked) ? 'fa-square-check' : 'fa-square'} text-brand-500`}></i>
+            Select all
+          </button>
+          <span className="text-xs text-slate-400">·</span>
+          <span className="text-xs font-medium text-brand-600">{selectedCount} selected</span>
+        </div>
+        <button onClick={addRow} className="text-xs text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1 transition">
+          <i className="fa-solid fa-plus"></i> Add row
+        </button>
       </div>
-      <Input label="Date & time" type="datetime-local" value={date} onChange={e=>setDate(e.target.value)} />
-      {sel && <div className="text-xs text-slate-500 mb-3">Available: <b>{sel.qty} {sel.unit}</b> · Min stock {sel.minStock}</div>}
-      <div className="flex justify-end gap-2 mt-2">
+
+      <div className="border border-slate-200 rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+              <tr>
+                <th className="text-left px-3 py-2.5 font-semibold w-10"></th>
+                <th className="text-left px-3 py-2.5 font-semibold">Product</th>
+                <th className="text-right px-3 py-2.5 font-semibold w-24">In stock</th>
+                <th className="text-center px-3 py-2.5 font-semibold w-20">Qty</th>
+                <th className="text-center px-3 py-2.5 font-semibold w-28">Price ₹</th>
+                <th className="px-3 py-2.5 w-10"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, idx) => {
+                const p = products.find(x => x.id === r.productId);
+                if (!p) return null;
+                return (
+                  <tr key={idx} className={`border-t border-slate-100 transition ${r.checked ? 'bg-brand-50/40' : 'bg-white'}`}>
+                    <td className="px-3 py-2">
+                      <input type="checkbox" checked={r.checked} onChange={() => toggleRow(idx)} className="w-4 h-4 rounded border-slate-300 text-brand-600 focus:ring-brand-500 cursor-pointer" />
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="font-medium text-slate-800 text-sm">{p.name}</div>
+                      <div className="text-xs text-slate-400">{p.sku}</div>
+                    </td>
+                    <td className="px-3 py-2 text-right text-slate-500 text-xs">{fmtNum(p.qty)} {p.unit}</td>
+                    <td className="px-3 py-2">
+                      <input type="number" min="1" max={p.qty} value={r.qty} onChange={e => updateRow(idx, 'qty', e.target.value)} className="w-16 px-2 py-1.5 rounded-lg border border-slate-200 bg-white text-center text-sm focus:border-brand-400 focus:outline-none" />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input type="number" min="0" value={r.price} onChange={e => updateRow(idx, 'price', e.target.value)} className="w-20 px-2 py-1.5 rounded-lg border border-slate-200 bg-white text-center text-sm focus:border-brand-400 focus:outline-none" />
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <button onClick={() => removeRow(idx)} className="w-7 h-7 rounded-lg hover:bg-rose-50 text-slate-400 hover:text-rose-500 transition"><i className="fa-solid fa-xmark text-xs"></i></button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {rows.length === 0 && (
+          <div className="py-8 text-center text-sm text-slate-400">
+            <i className="fa-solid fa-inbox text-2xl mb-2 block"></i>
+            No rows. Click "Add row" to start.
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4">
+        <Input label="Date & time" type="datetime-local" value={date} onChange={e=>setDate(e.target.value)} />
+      </div>
+
+      {selectedCount > 0 && (
+        <div className="mt-3 p-3 rounded-xl bg-brand-50 border border-brand-100 text-xs text-brand-700">
+          <i className="fa-solid fa-circle-info mr-1"></i> {selectedCount} item{selectedCount!==1?'s':''} will be recorded with stock auto-deducted.
+        </div>
+      )}
+
+      <div className="flex justify-end gap-2 mt-4">
         <Button variant="secondary" onClick={onCancel}>Cancel</Button>
-        <Button onClick={()=>onSave({ productId, qty: Number(qty), price: Number(price), date: new Date(date).toISOString() })}><i className="fa-solid fa-check"></i>Record</Button>
+        <Button onClick={handleSubmit} disabled={selectedCount===0} className="magnetic ripple">
+          <i className="fa-solid fa-check"></i> Record {selectedCount>0 ? `${selectedCount} item${selectedCount!==1?'s':''}` : 'sale'}
+        </Button>
       </div>
     </div>
   );
