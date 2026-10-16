@@ -2553,7 +2553,242 @@ function App() {
     user: user,
     isPro: isPro,
     onSignOut: () => sbClient.auth.signOut()
+  }), /*#__PURE__*/React.createElement(Assistant, {
+    products: products,
+    sales: sales,
+    stats: stats,
+    prodById: prodById,
+    supById: supById,
+    setView: setView,
+    user: user
   }));
+}
+
+// ---------- AI Assistant ----------
+function Assistant({
+  products,
+  sales,
+  stats,
+  prodById,
+  supById,
+  setView,
+  user
+}) {
+  const [open, setOpen] = useState(false);
+  const [input, setInput] = useState('');
+  const [messages, setMessages] = useState([{
+    role: 'ai',
+    text: "Hi! I'm StockPilot AI 👋 I can help with:\n• Math calculations (try '15% of 2000')\n• Product & stock info\n• Sales & revenue data\n• Navigation help\n\nWhat would you like to know?"
+  }]);
+  const [typing, setTyping] = useState(false);
+  const scrollRef = useRef(null);
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, typing]);
+  function getAIResponse(q) {
+    const msg = q.toLowerCase().trim();
+
+    // Math: "X% of Y"
+    let m = msg.match(/(\d+(?:\.\d+)?)\s*%\s*of\s*(\d+(?:\.\d+)?)/);
+    if (m) {
+      const pct = parseFloat(m[1]),
+        num = parseFloat(m[2]);
+      return `✅ ${pct}% of ${fmtNum(num)} = **${fmtNum(Math.round(pct / 100 * num))}**`;
+    }
+
+    // Math: basic operations
+    m = msg.match(/(\d+(?:\.\d+)?)\s*([+\-*/x×÷])\s*(\d+(?:\.\d+)?)/);
+    if (m) {
+      const a = parseFloat(m[1]),
+        b = parseFloat(m[3]),
+        op = m[2];
+      let result = op === '+' ? a + b : op === '-' ? a - b : op === '*' || op === 'x' || op === '×' ? a * b : b !== 0 ? a / b : 'undefined (division by zero)';
+      return `✅ ${a} ${op} ${b} = **${typeof result === 'number' ? fmtNum(Math.round(result * 100) / 100) : result}**`;
+    }
+
+    // Math: "what is X" or "calculate X"
+    m = msg.match(/(?:what is|calculate|calc|compute|solve)?\s*(\d+(?:\.\d+)?)\s*([+\-*/x×÷])\s*(\d+(?:\.\d+)?)/);
+    if (m && !msg.includes('%')) {
+      const a = parseFloat(m[1]),
+        b = parseFloat(m[3]),
+        op = m[2];
+      let result = op === '+' ? a + b : op === '-' ? a - b : op === '*' || op === 'x' || op === '×' ? a * b : b !== 0 ? a / b : 'undefined';
+      return `✅ ${a} ${op} ${b} = **${typeof result === 'number' ? fmtNum(Math.round(result * 100) / 100) : result}**`;
+    }
+
+    // Total products
+    if (msg.includes('how many products') || msg.includes('total products') || msg.includes('product count')) {
+      return `📦 You have **${fmtNum(stats.totalProducts)} products** in your inventory.`;
+    }
+
+    // Low stock
+    if (msg.includes('low stock') || msg.includes('which products are low') || msg.includes('out of stock')) {
+      const items = [...stats.out, ...stats.low];
+      if (items.length === 0) return '✅ No products are low on stock right now!';
+      return `⚠️ **${items.length} product${items.length !== 1 ? 's' : ''}** need attention:\n${items.map(p => `• ${p.name} — ${p.qty} ${p.unit} left`).join('\n')}\n\nGo to **Low Stock & Reorder** for suggestions.`;
+    }
+
+    // Revenue
+    if (msg.includes('revenue') || msg.includes('total sales') || msg.includes('how much have i sold')) {
+      return `💰 **Sales Summary:**\n• Total revenue: **${fmtMoney(Math.round(stats.revenueAll))}**\n• Today: **${fmtMoney(Math.round(stats.revenueToday))}**\n• Units sold: **${fmtNum(sales.reduce((a, s) => a + s.qty, 0))}**`;
+    }
+
+    // Top selling
+    if (msg.includes('top sell') || msg.includes('best sell') || msg.includes('most sold')) {
+      const map = {};
+      sales.forEach(s => {
+        map[s.productId] = (map[s.productId] || 0) + s.qty;
+      });
+      const top = Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([id, q]) => ({
+        name: prodById[id]?.name || 'Unknown',
+        qty: q
+      }));
+      return `🏆 **Top selling products:**\n${top.map((t, i) => `${i + 1}. ${t.name} — ${fmtNum(t.qty)} sold`).join('\n')}`;
+    }
+
+    // Inventory value
+    if (msg.includes('inventory value') || msg.includes('stock value') || msg.includes('worth')) {
+      return `💎 Your inventory is worth approximately **${fmtMoney(Math.round(stats.value))}** at cost price.`;
+    }
+
+    // Profit calculation
+    if (msg.includes('profit')) {
+      const revenue = stats.revenueAll;
+      const cogs = sales.reduce((a, s) => a + (prodById[s.productId]?.cost || 0) * s.qty, 0);
+      const profit = revenue - cogs;
+      const margin = revenue > 0 ? (profit / revenue * 100).toFixed(1) : 0;
+      return `📈 **Profit Analysis:**\n• Revenue: ${fmtMoney(Math.round(revenue))}\n• Cost: ${fmtMoney(Math.round(cogs))}\n• **Profit: ${fmtMoney(Math.round(profit))}**\n• Margin: ${margin}%`;
+    }
+
+    // Navigation help
+    if (msg.includes('how to add') || msg.includes('add product') || msg.includes('new product')) {
+      return `➕ To add a product:\n1. Go to **Inventory** (left sidebar)\n2. Click **"Add product"** button\n3. Fill in name, SKU, quantity, price\n4. Click **Save**\n\nThat's it! 🎉`;
+    }
+    if (msg.includes('how to record') || msg.includes('add sale') || msg.includes('new sale')) {
+      return `🛒 To record a sale:\n1. Go to **Sales** (left sidebar)\n2. Click **"Record sale"**\n3. Select product, enter quantity & price\n4. Click **Record**\n\nThe stock updates automatically! ✅`;
+    }
+    if (msg.includes('how to add supplier') || msg.includes('new supplier')) {
+      return `🚛 To add a supplier:\n1. Go to **Suppliers** (left sidebar)\n2. Click **"Add supplier"**\n3. Fill in name, contact, phone\n4. Click **Save**`;
+    }
+
+    // Help
+    if (msg.includes('help') || msg.includes('what can you do') || msg.includes('features')) {
+      return `🤖 I can help you with:\n\n• **Math**: "15% of 2000", "100 + 50", "80/4"\n• **Inventory**: "How many products?", "Inventory value"\n• **Sales**: "Total revenue", "Top selling products"\n• **Low stock": "Which products are low?"\n• **Profit**: "Show profit"\n• **Navigation**: "How to add a product?"\n\nJust ask naturally! 😊`;
+    }
+
+    // Greetings
+    if (msg.includes('hello') || msg.includes('hi') || msg.includes('hey')) {
+      return `Hello! 👋 How can I help you today? Try asking me about your inventory, sales, or do a quick calculation!`;
+    }
+
+    // Default
+    return `🤔 I'm not sure about that yet. Try asking me:\n• "15% of 2000" — for math\n• "How many products?" — for inventory\n• "Total revenue" — for sales\n• "What can you do?" — for help\n\nOr type "help" to see all my features!`;
+  }
+  function send() {
+    const text = input.trim();
+    if (!text) return;
+    setMessages(m => [...m, {
+      role: 'user',
+      text
+    }]);
+    setInput('');
+    setTyping(true);
+    setTimeout(() => {
+      const reply = getAIResponse(text);
+      setMessages(m => [...m, {
+        role: 'ai',
+        text: reply
+      }]);
+      setTyping(false);
+    }, 600);
+  }
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setOpen(!open),
+    className: "fixed bottom-6 right-6 z-50 w-14 h-14 rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-soft flex items-center justify-center text-xl magnetic",
+    title: "AI Assistant"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: `fa-solid ${open ? 'fa-xmark' : 'fa-robot'}`
+  })), open && /*#__PURE__*/React.createElement("div", {
+    className: "fixed bottom-24 right-6 z-50 w-[92vw] max-w-[400px] h-[540px] max-h-[74vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden fade-in"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-3 px-4 py-3.5 bg-gradient-to-r from-brand-600 to-brand-700 text-white"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fa-solid fa-robot"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "flex-1"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "font-semibold text-sm"
+  }, "StockPilot AI"), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-white/70"
+  }, "Ask me anything about your inventory")), /*#__PURE__*/React.createElement("span", {
+    className: "w-2 h-2 rounded-full bg-emerald-400"
+  })), /*#__PURE__*/React.createElement("div", {
+    ref: scrollRef,
+    className: "flex-1 overflow-y-auto scrollbar p-4 space-y-3 text-sm"
+  }, messages.map((m, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: `flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`
+  }, /*#__PURE__*/React.createElement("div", {
+    className: `max-w-[85%] px-3.5 py-2.5 rounded-2xl whitespace-pre-wrap ${m.role === 'user' ? 'bg-brand-600 text-white rounded-br-md' : 'bg-slate-100 text-slate-700 rounded-bl-md'}`
+  }, m.text.split('\n').map((line, j) => /*#__PURE__*/React.createElement("span", {
+    key: j
+  }, line.startsWith('**') ? /*#__PURE__*/React.createElement("strong", null, line.replace(/\*\*/g, '')) : line, j < m.text.split('\n').length - 1 && /*#__PURE__*/React.createElement("br", null)))))), typing && /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-start"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bg-slate-100 px-4 py-3 rounded-2xl rounded-bl-md flex gap-1"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "w-2 h-2 rounded-full bg-slate-400 animate-bounce",
+    style: {
+      animationDelay: '0ms'
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "w-2 h-2 rounded-full bg-slate-400 animate-bounce",
+    style: {
+      animationDelay: '150ms'
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "w-2 h-2 rounded-full bg-slate-400 animate-bounce",
+    style: {
+      animationDelay: '300ms'
+    }
+  })))), /*#__PURE__*/React.createElement("div", {
+    className: "px-3 pt-2 pb-1 flex gap-1.5 overflow-x-auto scrollbar border-t border-slate-100"
+  }, ['What can you do?', 'Total revenue', 'Low stock items', 'Top sellers', '15% of 2000'].map(chip => /*#__PURE__*/React.createElement("button", {
+    key: chip,
+    onClick: () => {
+      setInput(chip);
+      setTimeout(() => {
+        setMessages(m => [...m, {
+          role: 'user',
+          text: chip
+        }]);
+        setTyping(true);
+        setTimeout(() => {
+          setMessages(m => [...m, {
+            role: 'ai',
+            text: getAIResponse(chip)
+          }]);
+          setTyping(false);
+        }, 600);
+      }, 50);
+    },
+    className: "shrink-0 text-xs px-2.5 py-1.5 rounded-full bg-brand-50 text-brand-600 hover:bg-brand-100 transition"
+  }, chip))), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2 p-3 border-t border-slate-100"
+  }, /*#__PURE__*/React.createElement("input", {
+    value: input,
+    onChange: e => setInput(e.target.value),
+    onKeyDown: e => e.key === 'Enter' && send(),
+    placeholder: "Ask me anything...",
+    className: "flex-1 px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:border-brand-400 focus:outline-none text-sm"
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: send,
+    className: "w-10 h-10 rounded-xl bg-brand-600 text-white flex items-center justify-center hover:bg-brand-700 transition magnetic ripple"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fa-solid fa-paper-plane text-sm"
+  })))));
 }
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(/*#__PURE__*/React.createElement(App, null));

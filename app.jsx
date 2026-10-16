@@ -1,30 +1,31 @@
 
 const { useState, useEffect, useMemo, useRef, useCallback } = React;
-
 const STORAGE_KEY = 'stockpilot.v1';
 const SB_CONFIG_KEY = 'stockpilot.supabase.v1';
-
-// ===== EMBEDDED CONFIG — edit these if you change projects =====
 const SUPABASE_URL = 'https://ybfvkxbavmfndktpwrxz.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InliZnZreGJhdm1mbmRrdHB3cnh6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjU3ODgsImV4cCI6MjEwNzY0MTc4OH0.7qZ3utdkR54xGvi8qDWF6PB4j2yo850kbkha5TbN1Rc';
-const RAZORPAY_KEY_ID = 'YOUR_RAZORPAY_KEY_ID'; // e.g. rzp_test_1DP5mmOlF5G5ag
-// ===== DIRECT UPI (no KYC / no PAN needed to accept payments) =====
-// Put YOUR UPI ID here to enable instant UPI payments (QR + app deep-link).
-const UPI_ID = 'yourname@okhdfcbank';   // e.g. 9876543210@ybl  or  name@okhdfcbank
-const UPI_NAME = 'StockPilot';          // shown in the payer's UPI app
-// OAuth redirect: automatically uses whatever domain the app is running on
+const RAZORPAY_KEY_ID = 'YOUR_RAZORPAY_KEY_ID';
+const UPI_ID = 'yourname@okhdfcbank';
+const UPI_NAME = 'StockPilot';
 const REDIRECT_URL = window.location.origin + window.location.pathname;
-// =================================================================
-
 function getSbConfig() { try { const r = localStorage.getItem(SB_CONFIG_KEY); return r ? JSON.parse(r) : null; } catch(e) { return null; } }
 function saveSbConfig(cfg) { try { if (cfg) localStorage.setItem(SB_CONFIG_KEY, JSON.stringify(cfg)); else localStorage.removeItem(SB_CONFIG_KEY); } catch(e){} }
-function makeSbClient(cfg) {
-  if (!cfg || !cfg.url || !cfg.key || !window.supabase) return null;
-  try { return window.supabase.createClient(cfg.url.trim(), cfg.key.trim()); } catch(e) { return null; }
-}
-
+function makeSbClient(cfg) { if (!cfg || !cfg.url || !cfg.key || !window.supabase) return null; try { return window.supabase.createClient(cfg.url.trim(), cfg.key.trim()); } catch(e) { return null; } }
 function uid() { return Math.random().toString(36).slice(2,9) + Date.now().toString(36); }
-
+function uid2(n) { return 'sale_' + n + '_' + Math.random().toString(36).slice(2,6); }
+function storageKey(scope) { return STORAGE_KEY + '.' + (scope || 'anon'); }
+function loadData() { try { const raw = localStorage.getItem(storageKey('anon')); if (raw) return JSON.parse(raw); } catch(e){} return JSON.parse(JSON.stringify(seedData)); }
+function saveData(d, scope) { try { localStorage.setItem(storageKey(scope), JSON.stringify(d)); } catch(e){} }
+function loadCache(scope) { try { const raw = localStorage.getItem(storageKey(scope)); return raw ? JSON.parse(raw) : null; } catch(e){ return null; } }
+function proKey(scope) { return 'stockpilot.pro.' + (scope || 'anon'); }
+function loadPro(scope) { try { return localStorage.getItem(proKey(scope)) === '1'; } catch(e){ return false; } }
+function savePro(scope, on) { try { if (on) localStorage.setItem(proKey(scope), '1'); else localStorage.removeItem(proKey(scope)); } catch(e){} }
+function fmtMoney(n) { return '₹' + Number(n||0).toLocaleString('en-IN'); }
+function fmtNum(n) { return Number(n||0).toLocaleString('en-IN'); }
+function fmtDate(s) { const d = new Date(s); return d.toLocaleDateString('en-IN', {day:'numeric',month:'short'}); }
+function daysAgo(n) { const d = new Date(); d.setDate(d.getDate()-n); return d; }
+function sumRevenue(list) { return list.reduce((a,s)=>a + Number(s.qty||0)*Number(s.price||0), 0); }
+function sumUnits(list) { return list.reduce((a,s)=>a + Number(s.qty||0), 0); }
 const seedData = {
   suppliers: [
     { id:'s1', name:'FreshMart Distributors', contact:'Ravi Kumar', phone:'+91 98765 43210', email:'ravi@freshmart.in', city:'Chennai', notes:'Grocery & dairy' },
@@ -44,53 +45,13 @@ const seedData = {
     { id:'p9', name:'Tomato (Kg)', sku:'PR-302', category:'Produce', supplier:'s4', qty:2, unit:'kg', minStock:5, price:60, cost:35 },
     { id:'p10', name:'Instant Noodles Pack', sku:'GR-003', category:'Groceries', supplier:'s1', qty:55, unit:'packs', minStock:20, price:40, cost:28 }
   ],
-  sales: (() => {
-    const out = []; const now = Date.now();
-    const rows = [
-      ['p1',2,480],['p3',5,68],['p2',3,165],['p4',1,1299],['p10',8,40],
-      ['p6',2,349],['p1',1,480],['p9',3,60],['p7',1,1499],['p5',2,199],
-      ['p2',4,165],['p8',2,180],['p3',6,68],['p10',10,40],['p4',2,1299]
-    ];
-    rows.forEach((r,i)=>{
-      out.push({ id: uid2(i), productId:r[0], qty:r[1], price:r[2], date: new Date(now - (i*0.8+0.2)*86400000).toISOString() });
-    });
-    return out;
-  })()
+  sales: (() => { const out = []; const now = Date.now(); const rows = [['p1',2,480],['p3',5,68],['p2',3,165],['p4',1,1299],['p10',8,40],['p6',2,349],['p1',1,480],['p9',3,60],['p7',1,1499],['p5',2,199],['p2',4,165],['p8',2,180],['p3',6,68],['p10',10,40],['p4',2,1299]]; rows.forEach((r,i)=>{ out.push({ id: uid2(i), productId:r[0], qty:r[1], price:r[2], date: new Date(now - (i*0.8+0.2)*86400000).toISOString() }); }); return out; })()
 };
 
-function uid2(n){ return 'sale_'+n+'_'+Math.random().toString(36).slice(2,6); }
-
-function storageKey(scope){ return STORAGE_KEY + '.' + (scope || 'anon'); }
-function loadData() {
-  try { const raw = localStorage.getItem(storageKey('anon')); if (raw) return JSON.parse(raw); } catch(e){}
-  return JSON.parse(JSON.stringify(seedData));
-}
-function saveData(d, scope){ try { localStorage.setItem(storageKey(scope), JSON.stringify(d)); } catch(e){} }
-function loadCache(scope){ try { const raw = localStorage.getItem(storageKey(scope)); return raw ? JSON.parse(raw) : null; } catch(e){ return null; } }
-
-// Per-account Pro flag (local prototype entitlement).
-function proKey(scope){ return 'stockpilot.pro.' + (scope || 'anon'); }
-function loadPro(scope){ try { return localStorage.getItem(proKey(scope)) === '1'; } catch(e){ return false; } }
-function savePro(scope, on){ try { if (on) localStorage.setItem(proKey(scope), '1'); else localStorage.removeItem(proKey(scope)); } catch(e){} }
-
-function fmtMoney(n){ return '₹' + Number(n||0).toLocaleString('en-IN'); }
-function fmtNum(n){ return Number(n||0).toLocaleString('en-IN'); }
-function fmtDate(s){ const d=new Date(s); return d.toLocaleDateString('en-IN', {day:'numeric',month:'short'}); }
-function daysAgo(n){ const d=new Date(); d.setDate(d.getDate()-n); return d; }
-
-// ---------- UI primitives ----------
 function Badge({ children, tone='slate' }) {
-  const tones = {
-    slate:'bg-slate-100 text-slate-700',
-    green:'bg-emerald-100 text-emerald-700',
-    amber:'bg-amber-100 text-amber-700',
-    red:'bg-rose-100 text-rose-700',
-    blue:'bg-indigo-100 text-indigo-700',
-    violet:'bg-violet-100 text-violet-700'
-  };
+  const tones = { slate:'bg-slate-100 text-slate-700', green:'bg-emerald-100 text-emerald-700', amber:'bg-amber-100 text-amber-700', red:'bg-rose-100 text-rose-700', blue:'bg-indigo-100 text-indigo-700', violet:'bg-violet-100 text-violet-700' };
   return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${tones[tone]}`}>{children}</span>;
 }
-
 function Modal({ open, onClose, title, children, width='max-w-lg' }) {
   if (!open) return null;
   return (
@@ -106,7 +67,6 @@ function Modal({ open, onClose, title, children, width='max-w-lg' }) {
     </div>
   );
 }
-
 function Input({ label, ...props }) {
   return (
     <div className="mb-4">
@@ -123,26 +83,10 @@ function Select({ label, children, ...props }) {
     </div>
   );
 }
-function Textarea({ label, ...props }) {
-  return (
-    <div className="mb-4">
-      {label && <label className="block text-sm font-medium text-slate-700 mb-1.5">{label}</label>}
-      <textarea {...props} className={`w-full px-3.5 py-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-brand-400 focus:ring-2 focus:ring-brand-100 outline-none text-sm transition resize-none ${props.className||''}`} />
-    </div>
-  );
-}
-
 function Button({ children, variant='primary', className='', ...props }) {
-  const v = {
-    primary:'bg-brand-600 hover:bg-brand-700 text-white shadow-sm',
-    secondary:'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200',
-    danger:'bg-rose-500 hover:bg-rose-600 text-white',
-    ghost:'hover:bg-slate-100 text-slate-600',
-    success:'bg-emerald-500 hover:bg-emerald-600 text-white'
-  }[variant];
+  const v = { primary:'bg-brand-600 hover:bg-brand-700 text-white shadow-sm', secondary:'bg-white hover:bg-slate-50 text-slate-700 border border-slate-200', danger:'bg-rose-500 hover:bg-rose-600 text-white', ghost:'hover:bg-slate-100 text-slate-600', success:'bg-emerald-500 hover:bg-emerald-600 text-white' }[variant];
   return <button {...props} className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition active:scale-[.98] disabled:opacity-50 ${v} ${className}`}>{children}</button>;
 }
-
 function Empty({ icon, title, sub }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -152,76 +96,33 @@ function Empty({ icon, title, sub }) {
     </div>
   );
 }
-
-// ---------- Supabase helpers ----------
-function productToDb(p, userId){ return {id:p.id,user_id:userId,name:p.name,sku:p.sku,category:p.category,supplier:p.supplier||null,qty:p.qty,unit:p.unit,min_stock:p.minStock,price:p.price,cost:p.cost}; }
-function dbToProduct(r){ return {id:r.id,name:r.name,sku:r.sku,category:r.category,supplier:r.supplier,qty:r.qty,unit:r.unit,minStock:r.min_stock,price:r.price,cost:r.cost}; }
-function supplierToDb(s, userId){ return {id:s.id,user_id:userId,name:s.name,contact:s.contact||null,phone:s.phone||null,email:s.email||null,city:s.city||null,notes:s.notes||null}; }
-function dbToSupplier(r){ return {id:r.id,name:r.name,contact:r.contact,email:r.email,phone:r.phone,city:r.city,notes:r.notes}; }
-function saleToDb(s, userId){ return {id:s.id,user_id:userId,product_id:s.productId,qty:s.qty,price:s.price,date:s.date}; }
-function dbToSale(r){ return {id:r.id,productId:r.product_id,qty:r.qty,price:r.price,date:r.date}; }
-
-// Build a fresh sample dataset with unique ids, owned by one user
-function buildSeed(userId){
-  const supMap = {}, prodMap = {};
-  const suppliers = seedData.suppliers.map(s => { const nid = uid(); supMap[s.id] = nid; return {...s, id:nid}; });
-  const products = seedData.products.map(p => { const nid = uid(); prodMap[p.id] = nid; return {...p, id:nid, supplier: p.supplier ? supMap[p.supplier] : null}; });
-  const sales = seedData.sales.map(s => ({...s, id: uid(), productId: prodMap[s.productId] || null}));
-  return { suppliers, products, sales, userId };
-}
-
-async function fetchAllFromSb(sb, userId){
-  // Per-user scope first (requires the multi-user migration). Falls back gracefully
-  // if the user_id column / policies aren't in place yet, so the app never hangs.
-  async function run(uid){
-    const sc = (q) => (uid ? q.eq('user_id', uid) : q);
-    const [prods,sups,sales] = await Promise.all([
-      sc(sb.from('products').select('*')),
-      sc(sb.from('suppliers').select('*')),
-      sc(sb.from('sales').select('*'))
-    ]);
-    const err = prods.error || sups.error || sales.error;
-    if (err) return { error: err };
-    return {
-      scoped: !!uid,
-      products: (prods.data||[]).map(dbToProduct),
-      suppliers: (sups.data||[]).map(dbToSupplier),
-      sales: (sales.data||[]).map(dbToSale)
-    };
-  }
-
-  let r;
-  try { r = await run(userId); }
-  catch (e) { r = { error: e }; }
-
-  if (r.error) {
-    console.warn('per-user fetch unavailable, retrying unfiltered:', r.error.message || r.error);
-    try { r = await run(null); }
-    catch (e) { r = { error: e }; }
-    if (r.error) { console.error('Supabase fetch error', r.error); return null; }
-  }
+function productToDb(p, userId) { return {id:p.id,user_id:userId,name:p.name,sku:p.sku,category:p.category,supplier:p.supplier||null,qty:p.qty,unit:p.unit,min_stock:p.minStock,price:p.price,cost:p.cost}; }
+function dbToProduct(r) { return {id:r.id,name:r.name,sku:r.sku,category:r.category,supplier:r.supplier,qty:r.qty,unit:r.unit,minStock:r.min_stock,price:r.price,cost:r.cost}; }
+function supplierToDb(s, userId) { return {id:s.id,user_id:userId,name:s.name,contact:s.contact||null,phone:s.phone||null,email:s.email||null,city:s.city||null,notes:s.notes||null}; }
+function dbToSupplier(r) { return {id:r.id,name:r.name,contact:r.contact,email:r.email,phone:r.phone,city:r.city,notes:r.notes}; }
+function saleToDb(s, userId) { return {id:s.id,user_id:userId,product_id:s.productId,qty:s.qty,price:s.price,date:s.date}; }
+function dbToSale(r) { return {id:r.id,productId:r.product_id,qty:r.qty,price:r.price,date:r.date}; }
+function buildSeed(userId) { const supMap = {}, prodMap = {}; const suppliers = seedData.suppliers.map(s => { const nid = uid(); supMap[s.id] = nid; return {...s, id:nid}; }); const products = seedData.products.map(p => { const nid = uid(); prodMap[p.id] = nid; return {...p, id:nid, supplier: p.supplier ? supMap[p.supplier] : null}; }); const sales = seedData.sales.map(s => ({...s, id: uid(), productId: prodMap[s.productId] || null})); return { suppliers, products, sales, userId }; }
+async function fetchAllFromSb(sb, userId) {
+  async function run(uid) { const sc = (q) => (uid ? q.eq('user_id', uid) : q); const [prods,sups,sales] = await Promise.all([sc(sb.from('products').select('*')), sc(sb.from('suppliers').select('*')), sc(sb.from('sales').select('*'))]); const err = prods.error || sups.error || sales.error; if (err) return { error: err }; return { scoped: !!uid, products: (prods.data||[]).map(dbToProduct), suppliers: (sups.data||[]).map(dbToSupplier), sales: (sales.data||[]).map(dbToSale) }; }
+  let r; try { r = await run(userId); } catch (e) { r = { error: e }; }
+  if (r.error) { console.warn('per-user fetch unavailable, retrying unfiltered:', r.error.message || r.error); try { r = await run(null); } catch (e) { r = { error: e }; } if (r.error) { console.error('Supabase fetch error', r.error); return null; } }
   if (!r.scoped) console.warn('Running unfiltered — run supabase-migration-multiuser.sql to isolate each account.');
   return { scoped: r.scoped, products: r.products, suppliers: r.suppliers, sales: r.sales };
 }
-async function upsertRow(sb, table, payload){ const {error}=await sb.from(table).upsert(payload); if (error) console.error('upsert error',table,error); }
-async function deleteRow(sb, table, id){ const {error}=await sb.from(table).delete().eq('id',id); if (error) console.error('delete error',table,error); }
-
-// ---------- Login Screen (Google OAuth) ----------
+async function upsertRow(sb, table, payload) { const {error} = await sb.from(table).upsert(payload); if (error) console.error('upsert error', table, error); }
+async function deleteRow(sb, table, id) { const {error} = await sb.from(table).delete().eq('id', id); if (error) console.error('delete error', table, error); }
+function upiLink(upiId, amount, note) {
+  const id = (upiId || UPI_ID).trim();
+  const pn = encodeURIComponent(UPI_NAME);
+  const tn = encodeURIComponent(note || 'StockPilot');
+  const tr = 'SP' + Date.now();
+  return `upi://pay?pa=${id}&pn=${pn}&am=${Number(amount).toFixed(2)}&cu=INR&tn=${tn}&tr=${tr}`;
+}
 function LoginScreen({ sb }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  async function loginWithGoogle() {
-    setLoading(true); setError('');
-    try {
-      const { error: e } = await sb.auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo: REDIRECT_URL }
-      });
-      if (e) { setError(e.message); setLoading(false); }
-    } catch (err) { setError(err.message); setLoading(false); }
-  }
-
+  async function loginWithGoogle() { setLoading(true); setError(''); try { const { error: e } = await sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: REDIRECT_URL } }); if (e) { setError(e.message); setLoading(false); } } catch (err) { setError(err.message); setLoading(false); } }
   const features = [
     { icon:'fa-solid fa-boxes-stacked', title:'Real-time inventory', sub:'Live stock levels across every product' },
     { icon:'fa-solid fa-chart-line', title:'Sales analytics', sub:'7-day trends and top sellers at a glance' },
@@ -230,621 +131,485 @@ function LoginScreen({ sb }) {
   ];
   const chips = ['Google sign-in', 'Zero setup', 'Supabase-backed', 'Razorpay ready'];
   const marquee = ['Inventory', 'Sales', 'Suppliers', 'Low-stock alerts', 'Reorder points', 'Revenue trends', 'Top sellers', 'Multi-account'];
-
-  const GoogleG = (
-    <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24">
-      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-    </svg>
-  );
-
+  const GoogleG = (<svg viewBox="0 0 24 24" className="w-5 h-5"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.1a7.16 7.16 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>);
   return (
-    <div className="min-h-screen relative overflow-hidden bg-slate-950 text-white">
-      {/* animated background */}
-      <div className="absolute inset-0 grid-bg opacity-60"></div>
-      <div className="absolute -top-32 -left-24 w-[38rem] h-[38rem] rounded-full bg-indigo-600/30 blur-3xl blob"></div>
-      <div className="absolute -bottom-40 -right-24 w-[36rem] h-[36rem] rounded-full bg-fuchsia-600/20 blur-3xl blob-2"></div>
-      <div className="absolute top-1/4 left-1/2 w-80 h-80 rounded-full bg-sky-500/20 blur-3xl blob"></div>
-      <div className="absolute inset-0 bg-gradient-to-b from-slate-950/10 via-transparent to-slate-950/60 pointer-events-none"></div>
-
-      <div className="relative z-10 min-h-screen flex items-center justify-center p-5 sm:p-8">
-        <div className="w-full max-w-6xl grid lg:grid-cols-2 gap-10 lg:gap-16 items-center">
-
-          {/* LEFT — brand showcase */}
-          <div className="hidden lg:flex flex-col gap-9">
-            <div className="flex items-center gap-4 fade-up" style={{animationDelay:'.05s'}}>
-              <div className="relative flex items-center justify-center">
-                <div className="absolute w-20 h-20 rounded-full border border-dashed border-indigo-400/40 ring-spin"></div>
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-brand-400 via-brand-500 to-brand-700 flex items-center justify-center text-white logo-pulse">
-                  <i className="fa-solid fa-warehouse text-xl"></i>
-                </div>
-              </div>
-              <div>
-                <div className="text-2xl font-extrabold tracking-tight">Stock<span className="gradient-text">Pilot</span></div>
-                <div className="text-xs text-slate-400 tracking-widest uppercase">Inventory &amp; Supply</div>
-              </div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4 md:p-8 relative overflow-hidden">
+      <div className="absolute inset-0 grid-bg opacity-50"></div>
+      <div className="blob absolute top-20 left-20 w-64 h-64 bg-brand-500/20 rounded-full blur-3xl"></div>
+      <div className="blob-2 absolute bottom-20 right-20 w-80 h-80 bg-purple-500/20 rounded-full blur-3xl"></div>
+      <div className="relative z-10 w-full max-w-5xl grid lg:grid-cols-2 gap-8 items-center">
+        <div className="hidden lg:block fade-up">
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-brand-400 to-brand-700 flex items-center justify-center text-white shadow-lg logo-pulse">
+              <i className="fa-solid fa-warehouse text-2xl"></i>
             </div>
-
             <div>
-              <h1 className="text-5xl xl:text-6xl font-extrabold leading-[1.05] tracking-tight fade-up" style={{animationDelay:'.15s'}}>
-                Run your inventory<br/>on <span className="gradient-text">autopilot</span>
-              </h1>
-              <p className="mt-5 text-slate-300 text-lg max-w-md fade-up" style={{animationDelay:'.25s'}}>
-                Track stock, record sales, and never miss a reorder — all in one clean, real-time dashboard.
-              </p>
-            </div>
-
-            <ul className="space-y-4">
-              {features.map((f,i)=>(
-                <li key={f.title} className="flex items-center gap-4 fade-up" style={{animationDelay:(0.35+i*0.12)+'s'}}>
-                  <span className="w-11 h-11 shrink-0 rounded-2xl glass-dark border border-white/10 flex items-center justify-center text-brand-300">
-                    <i className={f.icon}></i>
-                  </span>
-                  <div>
-                    <div className="font-semibold text-slate-100">{f.title}</div>
-                    <div className="text-sm text-slate-400">{f.sub}</div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-
-            <div className="flex flex-wrap gap-2 fade-up" style={{animationDelay:'.9s'}}>
-              {chips.map(c=>(
-                <span key={c} className="text-xs px-3 py-1.5 rounded-full glass-dark border border-white/10 text-slate-300">
-                  <i className="fa-solid fa-check text-emerald-400 mr-1.5"></i>{c}
-                </span>
-              ))}
+              <div className="text-2xl font-bold text-white">StockPilot</div>
+              <div className="text-slate-400 text-sm">Inventory &amp; Supply</div>
             </div>
           </div>
-
-          {/* RIGHT — login card */}
-          <div className="w-full max-w-md mx-auto fade-up" style={{animationDelay:'.2s'}}>
-            <div className="relative">
-              <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500/40 via-fuchsia-500/30 to-sky-500/40 rounded-[2rem] blur-2xl opacity-70"></div>
-              <div className="relative glass rounded-[1.75rem] p-7 sm:p-9 shadow-2xl border border-white/50 fade-in2">
-
-                {/* mobile logo */}
-                <div className="lg:hidden flex flex-col items-center mb-7 text-center">
-                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-400 via-brand-500 to-brand-700 flex items-center justify-center text-white logo-pulse mb-3">
-                    <i className="fa-solid fa-warehouse text-2xl"></i>
-                  </div>
-                  <div className="text-2xl font-extrabold tracking-tight text-slate-900">Stock<span className="gradient-text">Pilot</span></div>
-                  <div className="text-xs text-slate-400 mt-0.5">Inventory &amp; Supply Dashboard</div>
-                </div>
-
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" style={{animation:'dotPulse 1.6s ease-in-out infinite'}}></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-                  </span>
-                  <span className="text-xs font-medium text-emerald-600">Live data sync</span>
-                </div>
-
-                <h2 className="text-2xl font-bold text-slate-900 mt-2">Welcome to StockPilot</h2>
-                <p className="text-sm text-slate-500 mt-1 mb-6">Sign in to sync your inventory across every device.</p>
-
-                {error && <div className="text-xs text-rose-600 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2 mb-4">{error}</div>}
-
-                <button onClick={loginWithGoogle} disabled={loading}
-                  className="btn-shine group w-full flex items-center justify-center gap-3 px-5 py-3.5 rounded-full bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold transition-all duration-200 shadow-lg hover:-translate-y-0.5 disabled:opacity-70 disabled:cursor-not-allowed">
-                  <span className="w-6 h-6 rounded-full bg-white flex items-center justify-center shadow-sm">
-                    {loading ? <i className="fa-solid fa-spinner fa-spin text-slate-700 text-xs"></i> : GoogleG}
-                  </span>
-                  {loading ? 'Redirecting to Google…' : 'Continue with Google'}
-                  {!loading && <i className="fa-solid fa-arrow-right text-xs opacity-60 group-hover:translate-x-0.5 transition-transform"></i>}
-                </button>
-
-                <div className="mt-6 pt-5 border-t border-slate-200/70 flex items-center justify-center gap-4 text-[11px] text-slate-400">
-                  <span><i className="fa-solid fa-shield-halved mr-1 text-slate-400"></i>Secure OAuth</span>
-                  <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-                  <span><i className="fa-solid fa-lock mr-1 text-slate-400"></i>Private per account</span>
-                </div>
-              </div>
+          <h1 className="text-4xl xl:text-5xl font-bold text-white leading-tight mb-4">Take control of your inventory with <span className="gradient-text">intelligence</span>.</h1>
+          <p className="text-lg text-slate-400 mb-8 max-w-lg">StockPilot helps small businesses track inventory, predict stockouts, and stay on top of reorders — all from one beautiful dashboard.</p>
+          <div className="flex flex-wrap gap-2 mb-8">{chips.map(c => <span key={c} className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-xs text-slate-300">{c}</span>)}</div>
+          <div className="flex gap-3 overflow-hidden max-w-lg">
+            <div className="marquee flex gap-3 whitespace-nowrap">
+              {[...marquee, ...marquee].map((w,i) => <span key={i} className="flex items-center gap-2 text-sm text-slate-500 px-3"><i className="fa-solid fa-circle text-[6px] text-brand-500"></i>{w}</span>)}
             </div>
-
-            <p className="text-center text-xs text-slate-500 mt-6 fade-in2" style={{animationDelay:'.6s'}}>
-              New here? Signing in creates your own private workspace automatically.
-            </p>
           </div>
         </div>
-      </div>
-
-      {/* bottom marquee */}
-      <div className="hidden md:block absolute bottom-0 left-0 right-0 border-t border-white/5 py-3 overflow-hidden pointer-events-none">
-        <div className="marquee flex items-center gap-10 whitespace-nowrap text-slate-500 text-sm">
-          {[...marquee, ...marquee].map((m,i)=>(
-            <span key={i} className="flex items-center gap-3"><i className="fa-solid fa-circle text-[5px] text-brand-500"></i>{m}</span>
-          ))}
+        <div className="w-full max-w-md mx-auto">
+          <div className="relative glass rounded-[1.75rem] p-7 sm:p-9 shadow-2xl border border-white/50 fade-in2">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-brand-400 to-brand-700 flex items-center justify-center text-white shadow-lg logo-pulse">
+                <i className="fa-solid fa-warehouse text-xl"></i>
+              </div>
+              <div>
+                <div className="font-bold text-slate-800 text-lg leading-tight">StockPilot</div>
+                <div className="text-xs text-slate-500">Inventory &amp; Supply Dashboard</div>
+              </div>
+            </div>
+            <h2 className="text-xl font-bold text-slate-800 mb-1">Welcome back</h2>
+            <p className="text-sm text-slate-500 mb-6">Sign in to sync your inventory across every device.</p>
+            {error && <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 text-sm">{error}</div>}
+            <button onClick={loginWithGoogle} disabled={loading} className="btn-shine w-full flex items-center justify-center gap-3 px-5 py-3.5 rounded-xl bg-white border border-slate-200 hover:bg-slate-50 hover:border-slate-300 transition font-medium text-slate-700 shadow-sm magnetic">
+              {loading ? <i className="fa-solid fa-circle-notch fa-spin text-brand-500"></i> : GoogleG}
+              <span>{loading ? 'Connecting…' : 'Continue with Google'}</span>
+            </button>
+            <div className="flex items-center gap-3 my-5">
+              <div className="flex-1 h-px bg-slate-200"></div>
+              <span className="text-xs text-slate-400">secure OAuth</span>
+              <div className="flex-1 h-px bg-slate-200"></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              {features.slice(0,4).map(f => (
+                <div key={f.title} className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                  <i className={`${f.icon} text-brand-500 mb-1.5`}></i>
+                  <div className="text-xs font-medium text-slate-700">{f.title}</div>
+                </div>
+              ))}
+            </div>
+            <p className="text-center text-xs text-slate-500 mt-6 fade-in2" style={{animationDelay:'.6s'}}>New here? Signing in creates your own private workspace automatically.</p>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-
-// ================= AI Assistant =================
-const AI_KEY_STORAGE = 'stockpilot.ai.key';
-const AI_MODEL_STORAGE = 'stockpilot.ai.model';
-const AI_MODEL_DEFAULT = 'gemini-2.0-flash';
-
-// Safe arithmetic: supports + - * / ^ ( ) %, "X% of Y", sqrt/log/pow, word operators.
-function safeMath(input) {
-  let s = ' ' + String(input || '').toLowerCase().trim() + ' ';
-  s = s.replace(/(\d+(?:\.\d+)?)\s*(?:%|percent)\s*of/g, '($1/100)*');
-  s = s.replace(/\bplus\b/g, ' + ')
-       .replace(/\bminus\b/g, ' - ')
-       .replace(/\b(?:times|multiplied by|multiply by)\b/g, ' * ')
-       .replace(/\b(?:divided by|over)\b/g, ' / ')
-       .replace(/\binto\b/g, ' * ')
-       .replace(/\bsquared\b/g, ' ** 2 ')
-       .replace(/\bcubed\b/g, ' ** 3 ');
-  s = s.replace(/^\s*(?:what\s+is|whats|what's|calculate|compute|solve|evaluate|how\s+much\s+is|result\s+of|value\s+of)\s*/, ' ');
-  s = s.replace(/(\d+(?:\.\d+)?)\s*(?:%|percent)\b/g, '($1/100)');
-  s = s.replace(/[?=,]/g, ' ');
-  s = s.replace(/\bx\b/g, ' * ');
-  s = s.replace(/\bsqrt\b/g, 'Math.sqrt').replace(/\babs\b/g, 'Math.abs')
-       .replace(/\bround\b/g, 'Math.round').replace(/\bfloor\b/g, 'Math.floor')
-       .replace(/\bceil\b/g, 'Math.ceil').replace(/\blog\b/g, 'Math.log')
-       .replace(/\bpow\b/g, 'Math.pow').replace(/\bpi\b/g, 'Math.PI');
-  s = s.trim();
-  if (!s || !/\d/.test(s)) return null;
-  const allowed = /^(?:Math\.(?:sqrt|abs|round|floor|ceil|log|pow|PI)|[0-9+\-*/().^ \t,])+$/;
-  if (!allowed.test(s)) return null;
-  try {
-    const val = Function('"use strict";return (' + s.replace(/\^/g, '**') + ');')();
-    if (typeof val === 'number' && isFinite(val)) return val;
-  } catch (e) {}
-  return null;
-}
-
-function findProduct(query, products) {
-  const stop = new Set(['how','many','of','the','is','are','do','i','have','stock','price','cost','quantity','qty','units','unit','for','a','an','what','whats',"what's",'show','me','my','current','left','in','value','total','and','about','tell','info','details','much','is','it']);
-  const tokens = String(query).toLowerCase().split(/[^a-z0-9]+/).filter(t => t && !stop.has(t));
-  if (!tokens.length) return null;
-  let best = null, bestScore = 0;
-  for (const p of products) {
-    const hay = (p.name + ' ' + (p.sku || '')).toLowerCase();
-    let score = 0;
-    tokens.forEach(t => { if (hay.includes(t)) score++; });
-    if (score > bestScore) { bestScore = score; best = p; }
-  }
-  return bestScore > 0 ? best : null;
-}
-
-// The offline brain: calculations, live inventory answers, and navigation.
-function assistantLocal(text, ctx) {
-  const q = String(text || '').trim();
-  const n = ' ' + q.toLowerCase() + ' ';
-  const products = ctx.products || [], suppliers = ctx.suppliers || [], sales = ctx.sales || [];
-  const prodById = ctx.prodById || {}, supById = ctx.supById || {};
-  const stats = ctx.stats || {};
-  const bullet = (arr) => arr.map(x => '• ' + x).join('\n');
-
-  // 1) Math
-  const m = safeMath(q);
-  if (m !== null) {
-    const out = Number.isInteger(m) ? m : Math.round(m * 1e6) / 1e6;
-    return { handled: true, reply: '`' + q + '` = **' + out.toLocaleString('en-IN') + '**' };
-  }
-
-  // 2) Navigation
-  if (/\b(open|go to|goto|navigate|switch to|take me to|view|show me)\b/.test(n)) {
-    const map = [ ['dashboard','dashboard'], ['inventory','inventory'], ['sales','sales'], ['supplier','suppliers'], ['low stock','alerts'], ['alert','alerts'], ['reorder','alerts'], ['out of stock','alerts'], ['restock','alerts'] ];
-    for (const [k, v] of map) if (n.includes(k)) return { handled: true, navigate: v, reply: 'Opening **' + v.charAt(0).toUpperCase() + v.slice(1) + '**…' };
-  }
-
-  // 3) Greetings / thanks
-  if (/^\s*(hi|hello|hey|yo|hola|namaste|good (morning|afternoon|evening))\b/.test(n)) {
-    return { handled: true, reply: 'Hi! 👋 I\'m your StockPilot assistant. Ask me about **low stock**, **inventory value**, **top sellers**, or a **calculation** like "18% of 3500".' };
-  }
-  if (/\b(thank|thanks|thank you|thx)\b/.test(n)) return { handled: true, reply: 'You\'re welcome! Anything else I can check?' };
-
-  // 4) Help
-  if (/\b(help|what can you do|commands|features|capabilities|what do you do)\b/.test(n)) {
-    return { handled: true, reply: 'I can:\n• Do math — "18% of 3500", "sqrt(144)", "1250*4"\n• Report stock — "low stock", "out of stock", "how many units"\n• Value & sales — "inventory value", "revenue today", "top sellers", "sales today"\n• Look up items — "stock of Basmati Rice", "price of USB-C Cable"\n• Suppliers — "list suppliers", "who supplies earbuds"\n• Navigate — "open sales"' };
-  }
-
-  // 5) Inventory queries
-  const isLow = /\b(low stock|running low|running out|reorder|restock|need to order|stock alert)\b/.test(n);
-  const isOut = /\b(out of stock|out of store|zero stock|sold out|finished)\b/.test(n);
-  if (isOut) {
-    const out = products.filter(p => p.qty <= 0);
-    if (!out.length) return { handled: true, reply: 'Good news — nothing is out of stock right now. ✅' };
-    return { handled: true, reply: '**Out of stock (' + out.length + '):**\n' + bullet(out.map(p => `${p.name} (${p.sku}) — 0 ${p.unit||'units'}`)) };
-  }
-  if (isLow) {
-    const low = products.filter(p => p.qty <= p.minStock);
-    if (!low.length) return { handled: true, reply: 'Everything is above its reorder level. 👍' };
-    return { handled: true, reply: '**Need attention (' + low.length + '):**\n' + bullet(low.map(p => `${p.name} — ${p.qty} ${p.unit||'units'} left (min ${p.minStock})${p.qty<=0?' · OUT':''}`)) };
-  }
-
-  // total inventory value
-  if (/\b(inventory value|stock value|total value|worth|net worth)\b/.test(n) || (/\bvalue\b/.test(n) && /\b(inventory|stock|goods)\b/.test(n))) {
-    const cost = products.reduce((a, p) => a + p.qty * (p.cost || p.price || 0), 0);
-    const retail = products.reduce((a, p) => a + p.qty * (p.price || 0), 0);
-    return { handled: true, reply: 'Inventory value is **' + fmtMoney(cost) + '** at cost (**' + fmtMoney(retail) + '** at selling price).' };
-  }
-
-  // counts
-  if (/\bhow many products\b|\btotal products\b|\bnumber of products\b|\bproduct count\b/.test(n))
-    return { handled: true, reply: 'You have **' + products.length + '** products across **' + suppliers.length + '** suppliers.' };
-  if (/\bhow many suppliers\b|\btotal suppliers\b|\bnumber of suppliers\b/.test(n))
-    return { handled: true, reply: 'You have **' + suppliers.length + '** suppliers.' };
-  if (/\b(how many units|total units|total stock|units in stock|total quantity)\b/.test(n)) {
-    const units = products.reduce((a, p) => a + (p.qty || 0), 0);
-    return { handled: true, reply: 'You currently hold **' + fmtNum(units) + '** units in total.' };
-  }
-
-  // top sellers
-  if (/\b(top[- ]sell\w*|best[- ]sell\w*|most sold|top product\w*|hot selling|popular)\b/.test(n)) {
-    const counts = {};
-    sales.forEach(s => { counts[s.productId] = (counts[s.productId] || 0) + s.qty; });
-    const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 5)
-      .map(([id, qty]) => { const p = prodById[id]; return p ? `${p.name} — ${qty} sold` : null; }).filter(Boolean);
-    return { handled: true, reply: top.length ? '**Top sellers:**\n' + bullet(top) : 'No sales recorded yet.' };
-  }
-
-  // revenue / sales
-  if (/\b(revenue|earn|earning|income|total sales|sales value)\b/.test(n) || /\b(sales today|sold today|today'?s sales)\b/.test(n)) {
-    const revenueAll = sales.reduce((a, s) => a + s.qty * s.price, 0);
-    const today = new Date().toDateString();
-    const revenueToday = sales.filter(s => new Date(s.date).toDateString() === today).reduce((a, s) => a + s.qty * s.price, 0);
-    const soldToday = sales.filter(s => new Date(s.date).toDateString() === today).reduce((a, s) => a + s.qty, 0);
-    return { handled: true, reply: 'Today: **' + fmtMoney(revenueToday) + '** across **' + fmtNum(soldToday) + '** units.\nAll-time revenue: **' + fmtMoney(revenueAll) + '** (' + sales.length + ' transactions).' };
-  }
-
-  // who supplies X (must come before generic supplier listing)
-  const whoSupplies = n.match(/(?:who supplies|supplier of|who is the supplier (?:of|for))\s+(.+)/);
-  if (whoSupplies) {
-    const p = findProduct(whoSupplies[1], products);
-    if (p) {
-      const s = supById[p.supplier];
-      return { handled: true, reply: p.name + ' is supplied by **' + (s ? s.name : 'an unassigned supplier') + '**' + (s && s.phone ? ' (' + s.phone + ')' : '') + '.' };
-    }
-  }
-
-  // suppliers list
-  if (/\b(suppliers?|supplier list)\b/.test(n)) {
-    return { handled: true, reply: suppliers.length ? '**Suppliers (' + suppliers.length + '):**\n' + bullet(suppliers.map(s => `${s.name}${s.city?' · '+s.city:''}${s.phone?' · '+s.phone:''}`)) : 'No suppliers yet.' };
-  }
-
-  // product lookup
-  const asksProduct = /\b(stock|qty|quantity|how many|on hand|left|available|price|cost|reorder|min)\b/.test(n);
-  const pq = q.replace(/^\s*(stock of|price of|cost of|how many|what is|whats|what's|show me|tell me about|about)\s*/i, '');
-  const matched = asksProduct ? findProduct(pq, products) : null;
-  if (matched) {
-    const s = supById[matched.supplier];
-    if (/\bprice\b/.test(n)) return { handled: true, reply: matched.name + ' sells for **' + fmtMoney(matched.price) + '** (cost ' + fmtMoney(matched.cost) + ').' };
-    if (/\bcost\b/.test(n)) return { handled: true, reply: matched.name + ' costs **' + fmtMoney(matched.cost) + '** to buy.' };
-    if (/\b(reorder|min)\b/.test(n)) return { handled: true, reply: matched.name + ' has a reorder level of **' + matched.minStock + ' ' + (matched.unit||'units') + '**; currently ' + matched.qty + '.' };
-    return { handled: true, reply: '**' + matched.name + '** (' + matched.sku + ')\n' + matched.qty + ' ' + (matched.unit||'units') + ' in stock · min ' + matched.minStock + ' · ' + fmtMoney(matched.price) + ' each' + (s ? '\nSupplier: ' + s.name : '') };
-  }
-
-  return { handled: false };
-}
-
-async function askGemini(apiKey, model, systemPrompt, history) {
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent?key=' + encodeURIComponent(apiKey);
-  const contents = history.filter(m => m.role !== 'system').map(m => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: [{ text: m.text }]
-  }));
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: systemPrompt }] },
-      contents,
-      generationConfig: { temperature: 0.6, maxOutputTokens: 512 }
-    })
-  });
-  if (!res.ok) {
-    let detail = '';
-    try { const j = await res.json(); detail = j.error?.message || ''; } catch (e) {}
-    throw new Error('AI request failed (' + res.status + ')' + (detail ? ': ' + detail : ''));
-  }
-  const j = await res.json();
-  const parts = j.candidates?.[0]?.content?.parts || [];
-  const text = parts.map(p => p.text || '').join('').trim();
-  return text || '(the model returned no text)';
-}
-
-function renderRich(text) {
-  return String(text).split('\n').map((ln, i) => {
-    const parts = ln.split(/(\*\*[^*]+\*\*)/g).filter(Boolean);
-    return (
-      <div key={i} className={ln.trim() === '' ? 'h-2' : ''}>
-        {parts.map((p, j) => (p.startsWith('**') && p.endsWith('**'))
-          ? <strong key={j} className="font-semibold">{p.slice(2, -2)}</strong>
-          : <span key={j}>{p.replace(/`/g, '')}</span>)}
-      </div>
-    );
-  });
-}
-
-function Assistant({ products, suppliers, sales, stats, prodById, supById, setView, user }) {
-  const [open, setOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [input, setInput] = useState('');
-  const [typing, setTyping] = useState(false);
-  const [apiKey, setApiKey] = useState(() => { try { return localStorage.getItem(AI_KEY_STORAGE) || ''; } catch (e) { return ''; } });
-  const [model, setModel] = useState(() => { try { return localStorage.getItem(AI_MODEL_STORAGE) || AI_MODEL_DEFAULT; } catch (e) { return AI_MODEL_DEFAULT; } });
-  const [keyDraft, setKeyDraft] = useState(apiKey);
-  const [modelDraft, setModelDraft] = useState(model);
-  const chatKey = 'stockpilot.chat.' + (user?.id || 'anon');
-  const [messages, setMessages] = useState(() => {
-    try { const r = localStorage.getItem(chatKey); if (r) return JSON.parse(r); } catch (e) {}
-    return [];
-  });
-  const scrollRef = useRef(null);
-
-  const ctx = { products, suppliers, sales, stats, prodById, supById };
-
-  const systemPrompt = useMemo(() => {
-    const low = products.filter(p => p.qty <= p.minStock);
-    const value = products.reduce((a, p) => a + p.qty * (p.cost || p.price || 0), 0);
-    const revenue = sales.reduce((a, s) => a + s.qty * s.price, 0);
-    const counts = {};
-    sales.forEach(s => { counts[s.productId] = (counts[s.productId] || 0) + s.qty; });
-    const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 3)
-      .map(([id, q]) => (prodById[id]?.name || '?') + ' (' + q + ')').join(', ');
-    return [
-      'You are StockPilot Assistant, a concise and friendly helper inside a small-business inventory dashboard.',
-      'Reply in short, clear sentences. Use the ₹ symbol for money. If asked to calculate, give the exact result.',
-      'Prefer the live data below when the question is about the user\'s stock.',
-      'Live data — products: ' + products.length + ', suppliers: ' + suppliers.length + ', low-stock items: ' + low.length + ', inventory value: ' + fmtMoney(value) + ', all-time revenue: ' + fmtMoney(revenue) + ', top sellers: ' + (top || 'none') + '.',
-      'Low-stock items: ' + (low.map(p => p.name + ' (' + p.qty + '/' + p.minStock + ')').join(', ') || 'none') + '.'
-    ].join(' ');
-  }, [products, suppliers, sales, prodById]);
-
+function Dashboard({ stats, products, sales, suppliers, setView, prodById, supById, avgDailySales, api }) {
+  const chartRef = useRef(null);
+  const chartInstance = useRef(null);
   useEffect(() => {
-    if (messages.length === 0) {
-      setMessages([{ role: 'assistant', text: 'Hi ' + ((user?.user_metadata?.full_name || '').split(' ')[0] || 'there') + '! 👋 I\'m your StockPilot assistant — try "low stock", "inventory value", "top sellers", or a calculation like "18% of 3500".' }]);
-    }
-  }, []);
-
-  useEffect(() => { try { localStorage.setItem(chatKey, JSON.stringify(messages)); } catch (e) {} }, [messages]);
-  useEffect(() => { const el = scrollRef.current; if (el) el.scrollTop = el.scrollHeight; }, [messages, typing, open, settingsOpen]);
-
-  const chips = ['Low stock items', 'Inventory value', 'Top sellers', 'Revenue today', 'What is 15% of 2000', 'Open sales'];
-
-  async function send(override) {
-    const text = (override !== undefined ? override : input).trim();
-    if (!text) return;
-    setInput('');
-    const history = [...messages, { role: 'user', text }];
-    setMessages(history);
-
-    const local = assistantLocal(text, ctx);
-    if (local.handled) {
-      if (local.navigate) { try { setView(local.navigate); } catch (e) {} }
-      setMessages(m => [...m, { role: 'assistant', text: local.reply }]);
-      return;
-    }
-    if (apiKey) {
-      setTyping(true);
-      try {
-        const reply = await askGemini(apiKey, model, systemPrompt, history.slice(-10));
-        setMessages(m => [...m, { role: 'assistant', text: reply }]);
-      } catch (e) {
-        setMessages(m => [...m, { role: 'assistant', text: '⚠️ ' + e.message + '\n\nI can still help with stock, sales, suppliers, and calculations.' }]);
-      } finally { setTyping(false); }
-      return;
-    }
-    setMessages(m => [...m, { role: 'assistant', text: 'I\'m not sure about that yet. I can do **calculations** and answer **stock, sales, supplier** questions.\nTip: tap the ⚙️ gear to connect a free AI model for open-ended chat.' }]);
-  }
-
-  function saveSettings() {
-    setApiKey(keyDraft.trim()); setModel(modelDraft.trim() || AI_MODEL_DEFAULT);
-    try {
-      if (keyDraft.trim()) localStorage.setItem(AI_KEY_STORAGE, keyDraft.trim()); else localStorage.removeItem(AI_KEY_STORAGE);
-      localStorage.setItem(AI_MODEL_STORAGE, modelDraft.trim() || AI_MODEL_DEFAULT);
-    } catch (e) {}
-    setSettingsOpen(false);
-  }
-  function removeKey() {
-    setApiKey(''); setKeyDraft('');
-    try { localStorage.removeItem(AI_KEY_STORAGE); } catch (e) {}
-  }
-
+    if (!chartRef.current) return;
+    if (chartInstance.current) chartInstance.current.destroy();
+    const labels = [], data = [];
+    for (let i=6; i>=0; i--) { const d = daysAgo(i); const key = d.toDateString(); labels.push(d.toLocaleDateString('en-IN',{weekday:'short'})); data.push(sales.filter(s=>new Date(s.date).toDateString()===key).reduce((a,s)=>a+s.qty*s.price,0)); }
+    chartInstance.current = new Chart(chartRef.current, { type:'bar', data: { labels, datasets:[{ label:'Revenue', data, backgroundColor:'#6366f1', borderRadius:8, hoverBackgroundColor:'#4338ca' }] }, options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>'₹'+c.parsed.y.toLocaleString('en-IN')}}}, scales:{y:{beginAtZero:true, ticks:{callback:v=>'₹'+v}, grid:{color:'#f1f5f9'}}, x:{grid:{display:false}}} } });
+    return ()=>{ if(chartInstance.current) chartInstance.current.destroy(); };
+  }, [sales]);
+  const recent = sales.slice(0,6);
+  const topProducts = useMemo(() => { const map = {}; sales.forEach(s => { map[s.productId] = (map[s.productId]||0) + s.qty; }); return Object.entries(map).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([id,q])=>({p:prodById[id],q})).filter(x=>x.p); }, [sales, prodById]);
+  const kpis = [
+    { label:'Total Products', value:fmtNum(stats.totalProducts), icon:'fa-solid fa-box', tone:'from-brand-500 to-brand-700', sub: (stats.low.length+stats.out.length)+' need attention' },
+    { label:'Low / Out of Stock', value:fmtNum(stats.low.length+stats.out.length), icon:'fa-solid fa-triangle-exclamation', tone:'from-amber-400 to-rose-500', sub: stats.out.length+' out of stock', click:()=>setView('alerts') },
+    { label:'Sold Today', value:fmtNum(stats.soldToday), icon:'fa-solid fa-cart-shopping', tone:'from-emerald-400 to-teal-500', sub:fmtMoney(stats.revenueToday)+' revenue' },
+    { label:'Inventory Value', value:fmtMoney(stats.value), icon:'fa-solid fa-indian-rupee-sign', tone:'from-violet-500 to-purple-700', sub:'at cost price' }
+  ];
   return (
-    <>
-      {/* Floating button */}
-      <button onClick={() => setOpen(o => !o)} title="Ask StockPilot"
-        className="fixed bottom-5 right-5 z-40 w-14 h-14 rounded-full bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-2xl flex items-center justify-center hover:scale-105 active:scale-95 transition-transform">
-        {!open && <span className="absolute inset-0 rounded-full bg-brand-500/50 animate-ping"></span>}
-        <i className={`relative fa-solid ${open ? 'fa-xmark' : 'fa-robot'} text-xl`}></i>
-      </button>
-
-      {open && (
-        <div className="fixed bottom-24 right-5 z-40 w-[92vw] max-w-[400px] h-[540px] max-h-[74vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden fade-in">
-          {/* Header */}
-          <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-4 py-3 flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 flex items-center justify-center"><i className="fa-solid fa-robot"></i></div>
-            <div className="flex-1 min-w-0">
-              <div className="font-semibold text-sm leading-tight">StockPilot Assistant</div>
-              <div className="text-[11px] text-slate-300 flex items-center gap-1.5">
-                <span className={`w-1.5 h-1.5 rounded-full ${apiKey ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
-                {apiKey ? 'AI model connected' : 'Built-in (offline)'}
+    <div className="space-y-6">
+      <div className="stagger-in grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {kpis.map((k,i)=>(
+          <div key={i} onClick={k.click} className={`kpi magnetic glass-card rounded-2xl p-5 shadow-layered border border-slate-100 ${k.click?'cursor-pointer':''}`}>
+            <div className="flex items-start justify-between">
+              <div>
+                <div className="text-xs font-medium text-slate-500 uppercase tracking-wide">{k.label}</div>
+                <div className="text-2xl font-bold text-slate-800 mt-2 counter">{k.value}</div>
+                <div className="text-xs text-slate-400 mt-1">{k.sub}</div>
               </div>
+              <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${k.tone} text-white flex items-center justify-center shadow-soft`}><i className={k.icon}></i></div>
             </div>
-            <button onClick={() => setSettingsOpen(s => !s)} title="AI settings" className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-slate-300"><i className="fa-solid fa-gear text-sm"></i></button>
-            <button onClick={() => setOpen(false)} className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-slate-300"><i className="fa-solid fa-xmark"></i></button>
           </div>
-
-          {settingsOpen ? (
-            <div className="flex-1 overflow-y-auto scrollbar p-4 space-y-3 text-sm">
-              <div className="font-semibold text-slate-800">Connect an AI model (optional)</div>
-              <p className="text-xs text-slate-500">Calculations, stock, sales and supplier questions work offline. Add a free Google Gemini API key to also chat about anything else.</p>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Gemini API key</label>
-                <input type="password" value={keyDraft} onChange={e => setKeyDraft(e.target.value)} placeholder="AIza..." className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm outline-none focus:ring-2 focus:ring-brand-200" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Model</label>
-                <input value={modelDraft} onChange={e => setModelDraft(e.target.value)} placeholder={AI_MODEL_DEFAULT} className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm outline-none focus:ring-2 focus:ring-brand-200" />
-              </div>
-              <div className="flex gap-2">
-                <button onClick={saveSettings} className="flex-1 px-3 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-800">Save</button>
-                <button onClick={removeKey} className="px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50">Remove key</button>
-              </div>
-              <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="block text-xs text-brand-600 hover:underline">Get a free Gemini API key →</a>
-              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-2">Your key is stored only in this browser. For a public site, route requests through your own server so the key stays private.</p>
-            </div>
-          ) : (
-            <>
-              <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar p-4 space-y-3 bg-slate-50/60">
-                {messages.map((msg, i) => (
-                  <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    {msg.role !== 'user' && (
-                      <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-brand-400 to-brand-700 text-white flex items-center justify-center mr-2 shrink-0"><i className="fa-solid fa-robot text-xs"></i></div>
-                    )}
-                    <div className={`max-w-[78%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed ${msg.role === 'user' ? 'bg-slate-900 text-white rounded-br-sm' : 'bg-white text-slate-700 border border-slate-200 rounded-bl-sm'}`}>
-                      {renderRich(msg.text)}
-                    </div>
-                  </div>
-                ))}
-                {typing && (
-                  <div className="flex justify-start">
-                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-brand-400 to-brand-700 text-white flex items-center justify-center mr-2 shrink-0"><i className="fa-solid fa-robot text-xs"></i></div>
-                    <div className="bg-white border border-slate-200 rounded-2xl rounded-bl-sm px-4 py-3 flex items-center gap-1">
-                      {[0, 1, 2].map(d => <span key={d} className="w-1.5 h-1.5 rounded-full bg-slate-400" style={{ animation: 'dotPulse 1s ease-in-out infinite', animationDelay: (d * 0.15) + 's' }}></span>)}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="px-3 pt-2 pb-1 flex gap-1.5 overflow-x-auto scrollbar border-t border-slate-100 bg-white">
-                {chips.map(c => (
-                  <button key={c} onClick={() => send(c)} className="shrink-0 text-xs px-2.5 py-1.5 rounded-full bg-slate-100 hover:bg-brand-50 hover:text-brand-700 text-slate-600 transition whitespace-nowrap">{c}</button>
-                ))}
-              </div>
-
-              <div className="p-3 bg-white">
-                <div className="flex items-end gap-2">
-                  <textarea rows={1} value={input} onChange={e => setInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
-                    placeholder="Ask about stock, sales, or a calculation…"
-                    className="flex-1 resize-none px-3.5 py-2.5 rounded-xl border border-slate-200 text-sm outline-none focus:ring-2 focus:ring-brand-200 max-h-24" />
-                  <button onClick={() => send()} disabled={typing || !input.trim()} className="w-10 h-10 shrink-0 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white flex items-center justify-center hover:opacity-90 disabled:opacity-40 transition"><i className="fa-solid fa-paper-plane text-sm"></i></button>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2 glass-card rounded-2xl p-5 shadow-layered border border-slate-100">
+          <div className="flex items-center justify-between mb-4">
+            <div><h3 className="font-semibold text-slate-800">Revenue — Last 7 days</h3><p className="text-xs text-slate-400">Daily sales revenue from recorded transactions</p></div>
+            <Badge tone="blue"><i className="fa-solid fa-chart-column mr-1"></i>Trend</Badge>
+          </div>
+          <div className="h-64"><canvas ref={chartRef}></canvas></div>
+        </div>
+        <div className="glass-card rounded-2xl p-5 shadow-layered border border-slate-100">
+          <h3 className="font-semibold text-slate-800 mb-3">Low stock alerts</h3>
+          {stats.low.length+stats.out.length===0 ? <Empty icon="fa-solid fa-circle-check" title="All stocked up" sub="No items below minimum level." /> : (
+            <div className="space-y-2 max-h-64 overflow-y-auto scrollbar stagger-in">
+              {[...stats.out, ...stats.low].map(p => (
+                <div key={p.id} className="interactive-row flex items-center justify-between p-3 rounded-xl bg-slate-50/50 transition-all">
+                  <div className="min-w-0"><div className="text-sm font-medium text-slate-700 truncate">{p.name}</div><div className="text-xs text-slate-400">{p.qty} {p.unit} left · min {p.minStock}</div></div>
+                  <Badge tone={p.qty<=0?'red':'amber'}>{p.qty<=0?'Out':'Low'}</Badge>
                 </div>
-                <div className="text-[10px] text-slate-400 text-center mt-1.5">StockPilot Assistant · answers from your live data</div>
-              </div>
-            </>
+              ))}
+            </div>
+          )}
+          <button onClick={()=>setView('alerts')} className="mt-3 w-full text-sm text-brand-600 font-medium hover:underline">View reorder suggestions →</button>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="glass-card rounded-2xl p-5 shadow-layered border border-slate-100">
+          <h3 className="font-semibold text-slate-800 mb-3">Recent sales</h3>
+          {recent.length===0 ? <Empty icon="fa-solid fa-receipt" title="No sales yet" sub="Record a sale to see activity here." /> : (
+            <div className="divide-y divide-slate-100 stagger-in">
+              {recent.map(s => { const p = prodById[s.productId]; return (
+                <div key={s.id} className="interactive-row flex items-center justify-between py-2.5 transition-all">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center text-sm"><i className="fa-solid fa-bag-shopping"></i></div>
+                    <div className="min-w-0"><div className="text-sm font-medium text-slate-700 truncate">{p?.name || 'Unknown'}</div><div className="text-xs text-slate-400">{s.qty} × {fmtMoney(s.price)} · {fmtDate(s.date)}</div></div>
+                  </div>
+                  <div className="text-sm font-semibold text-slate-800 counter">{fmtMoney(s.qty*s.price)}</div>
+                </div>
+              ); })}
+            </div>
           )}
         </div>
-      )}
-    </>
+        <div className="glass-card rounded-2xl p-5 shadow-layered border border-slate-100">
+          <h3 className="font-semibold text-slate-800 mb-3">Top selling products</h3>
+          {topProducts.length===0 ? <Empty icon="fa-solid fa-trophy" title="No data yet" sub="Sales will build this list." /> : (
+            <div className="space-y-3 stagger-in">
+              {topProducts.map((t,i) => { const max = topProducts[0].q; return (
+                <div key={t.p.id} className="interactive-row transition-all">
+                  <div className="flex items-center justify-between text-sm mb-1"><span className="font-medium text-slate-700 truncate">{i+1}. {t.p.name}</span><span className="text-slate-500 counter">{fmtNum(t.q)} sold</span></div>
+                  <div className="h-2 rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-gradient-to-r from-brand-400 to-brand-600 rounded-full" style={{width:`${(t.q/max)*100}%`}}></div></div>
+                </div>
+              ); })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+function Inventory({ products, suppliers, supById, api }) {
+  const [q, setQ] = useState('');
+  const [cat, setCat] = useState('all');
+  const [editing, setEditing] = useState(null);
+  const [open, setOpen] = useState(false);
+  const cats = useMemo(() => ['all', ...Array.from(new Set(products.map(p=>p.category)))], [products]);
+  const filtered = useMemo(() => products.filter(p => { const mq = !q || p.name.toLowerCase().includes(q.toLowerCase()) || p.sku.toLowerCase().includes(q.toLowerCase()); const mc = cat==='all' || p.category===cat; return mq && mc; }), [products,q,cat]);
+  function openNew(){ setEditing({}); setOpen(true); }
+  function openEdit(p){ setEditing({...p}); setOpen(true); }
+  function close(){ setOpen(false); setEditing(null); }
+  function save(form){ if (!form.name || !form.sku) return; const payload = { name:form.name, sku:form.sku, category:form.category||'General', supplier:form.supplier||null, qty:Number(form.qty||0), unit:form.unit||'pcs', minStock:Number(form.minStock||0), price:Number(form.price||0), cost:Number(form.cost||0) }; if (editing && editing.id) api.updateProduct(editing.id, payload); else api.addProduct(payload); close(); }
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+        <div className="flex gap-2 flex-1">
+          <div className="relative flex-1 max-w-md">
+            <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
+            <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search by name or SKU..." className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 bg-white focus:border-brand-400 focus:ring-2 focus:ring-brand-100 outline-none text-sm" />
+          </div>
+          <select value={cat} onChange={e=>setCat(e.target.value)} className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm focus:border-brand-400 outline-none">
+            {cats.map(c=> <option key={c} value={c}>{c==='all'?'All categories':c}</option>)}
+          </select>
+        </div>
+        <Button onClick={openNew} className="magnetic ripple"><i className="fa-solid fa-plus"></i>Add product</Button>
+      </div>
+      <div className="glass-card rounded-2xl shadow-layered border border-slate-100 overflow-hidden">
+        {filtered.length===0 ? <Empty icon="fa-solid fa-box-open" title="No products found" sub="Try a different search or add a product." /> : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                <tr>
+                  <th className="text-left px-5 py-3 font-semibold">Product</th>
+                  <th className="text-left px-5 py-3 font-semibold">Category</th>
+                  <th className="text-left px-5 py-3 font-semibold">Supplier</th>
+                  <th className="text-right px-5 py-3 font-semibold">Qty</th>
+                  <th className="text-right px-5 py-3 font-semibold">Min</th>
+                  <th className="text-right px-5 py-3 font-semibold">Price</th>
+                  <th className="text-center px-5 py-3 font-semibold">Status</th>
+                  <th className="text-right px-5 py-3 font-semibold">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(p => { const st = p.qty<=0 ? ['red','Out of stock'] : p.qty<=p.minStock ? ['amber','Low stock'] : ['green','In stock']; return (
+                  <tr key={p.id} className="interactive-row magnetic border-t border-slate-100">
+                    <td className="px-5 py-3"><div className="font-medium text-slate-800">{p.name}</div><div className="text-xs text-slate-400">{p.sku} · {p.unit}</div></td>
+                    <td className="px-5 py-3"><Badge tone="blue">{p.category}</Badge></td>
+                    <td className="px-5 py-3 text-slate-500 text-xs">{supById[p.supplier]?.name || '—'}</td>
+                    <td className="px-5 py-3 text-right font-semibold text-slate-800 counter">{fmtNum(p.qty)}</td>
+                    <td className="px-5 py-3 text-right text-slate-500">{fmtNum(p.minStock)}</td>
+                    <td className="px-5 py-3 text-right text-slate-700">{fmtMoney(p.price)}</td>
+                    <td className="px-5 py-3 text-center"><Badge tone={st[0]}>{st[1]}</Badge></td>
+                    <td className="px-5 py-3 text-right"><div className="inline-flex items-center gap-1">
+                      <button title="Decrease" onClick={()=>api.adjustQty(p.id,-1)} className="w-7 h-7 rounded-lg hover:bg-slate-100 text-slate-500 magnetic ripple"><i className="fa-solid fa-minus text-xs"></i></button>
+                      <button title="Increase" onClick={()=>api.adjustQty(p.id,1)} className="w-7 h-7 rounded-lg hover:bg-slate-100 text-slate-500 magnetic ripple"><i className="fa-solid fa-plus text-xs"></i></button>
+                      <button title="Edit" onClick={()=>openEdit(p)} className="w-7 h-7 rounded-lg hover:bg-brand-50 text-brand-600 magnetic ripple"><i className="fa-solid fa-pen text-xs"></i></button>
+                      <button title="Delete" onClick={()=>{ if(confirm('Delete '+p.name+'?')) api.deleteProduct(p.id); }} className="w-7 h-7 rounded-lg hover:bg-rose-50 text-rose-500 magnetic ripple"><i className="fa-solid fa-trash text-xs"></i></button>
+                    </div></td>
+                  </tr>
+                ); })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      <Modal open={open} onClose={close} title={editing && editing.id ? 'Edit product' : 'Add product'}>
+        <ProductForm initial={editing} suppliers={suppliers} onSave={save} onCancel={close} />
+      </Modal>
+    </div>
   );
 }
 
-// ---------- Payment Modal (Direct UPI + Razorpay card) ----------
-function upiLink(upiId, amount, note){
-  const q = (s)=>encodeURIComponent(s);
-  return 'upi://pay?pa='+q(upiId)+'&pn='+q(UPI_NAME)+'&am='+amount+'&cu=INR&tn='+q(note)+'&tr=SP'+Date.now();
+function ProductForm({ initial, suppliers, onSave, onCancel }) {
+  const [form, setForm] = useState(initial && initial.id ? { name:initial.name, sku:initial.sku, category:initial.category, supplier:initial.supplier, qty:initial.qty, unit:initial.unit, minStock:initial.minStock, price:initial.price, cost:initial.cost } : { name:'', sku:'', category:'Groceries', supplier:suppliers[0]?.id, qty:0, unit:'pcs', minStock:5, price:0, cost:0 });
+  const set = (k,v) => setForm(f=>({...f,[k]:v}));
+  return (
+    <div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Input label="Product name" value={form.name} onChange={e=>set('name',e.target.value)} placeholder="e.g. Basmati Rice 5kg" />
+        <Input label="SKU" value={form.sku} onChange={e=>set('sku',e.target.value)} placeholder="GR-001" />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Input label="Category" value={form.category} onChange={e=>set('category',e.target.value)} placeholder="Groceries" />
+        <Select label="Supplier" value={form.supplier||''} onChange={e=>set('supplier',e.target.value)}><option value="">None</option>{suppliers.map(s=> <option key={s.id} value={s.id}>{s.name}</option>)}</Select>
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <Input label="Quantity" type="number" value={form.qty} onChange={e=>set('qty',e.target.value)} />
+        <Input label="Unit" value={form.unit} onChange={e=>set('unit',e.target.value)} placeholder="pcs" />
+        <Input label="Min stock" type="number" value={form.minStock} onChange={e=>set('minStock',e.target.value)} />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Input label="Selling price (₹)" type="number" value={form.price} onChange={e=>set('price',e.target.value)} />
+        <Input label="Cost price (₹)" type="number" value={form.cost} onChange={e=>set('cost',e.target.value)} />
+      </div>
+      <div className="flex justify-end gap-2 mt-2">
+        <Button variant="secondary" onClick={onCancel}>Cancel</Button>
+        <Button onClick={()=>onSave(form)}><i className="fa-solid fa-check"></i>Save</Button>
+      </div>
+    </div>
+  );
 }
-const UPI_ID_RE = /^[a-zA-Z0-9._-]{2,}@[a-zA-Z]{2,}$/;
+
+function Sales({ products, sales, prodById, api }) {
+  const [open, setOpen] = useState(false);
+  const [filter, setFilter] = useState('all');
+  const filtered = useMemo(() => { if (filter==='all') return sales; const days = Number(filter); const cutoff = Date.now() - days*86400000; return sales.filter(s => new Date(s.date).getTime() >= cutoff); }, [sales, filter]);
+  const totalRevenue = filtered.reduce((a,s)=>a+s.qty*s.price,0);
+  const totalQty = filtered.reduce((a,s)=>a+s.qty,0);
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-slate-500">Showing:</span>
+          {[['all','All time'],['7','Last 7 days'],['30','Last 30 days']].map(([v,l])=>(
+            <button key={v} onClick={()=>setFilter(v)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition magnetic ${filter===v?'bg-brand-600 text-white':'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>{l}</button>
+          ))}
+        </div>
+        <Button onClick={()=>setOpen(true)} className="magnetic ripple"><i className="fa-solid fa-plus"></i>Record sale</Button>
+      </div>
+      <div className="stagger-in grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="glass-card rounded-2xl p-5 shadow-layered border border-slate-100"><div className="text-xs text-slate-500 font-medium uppercase">Transactions</div><div className="text-2xl font-bold mt-1 counter">{fmtNum(filtered.length)}</div></div>
+        <div className="glass-card rounded-2xl p-5 shadow-layered border border-slate-100"><div className="text-xs text-slate-500 font-medium uppercase">Units sold</div><div className="text-2xl font-bold mt-1 counter">{fmtNum(totalQty)}</div></div>
+        <div className="glass-card rounded-2xl p-5 shadow-layered border border-slate-100"><div className="text-xs text-slate-500 font-medium uppercase">Revenue</div><div className="text-2xl font-bold mt-1 counter">{fmtMoney(totalRevenue)}</div></div>
+      </div>
+      <div className="glass-card rounded-2xl shadow-layered border border-slate-100 overflow-hidden">
+        {filtered.length===0 ? <Empty icon="fa-solid fa-receipt" title="No sales recorded" sub="Click 'Record sale' to log a transaction." /> : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                <tr>
+                  <th className="text-left px-5 py-3 font-semibold">Product</th>
+                  <th className="text-right px-5 py-3 font-semibold">Qty</th>
+                  <th className="text-right px-5 py-3 font-semibold">Unit price</th>
+                  <th className="text-right px-5 py-3 font-semibold">Total</th>
+                  <th className="text-left px-5 py-3 font-semibold">Date</th>
+                  <th className="text-right px-5 py-3 font-semibold">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map(s => { const p = prodById[s.productId]; return (
+                  <tr key={s.id} className="interactive-row magnetic border-t border-slate-100">
+                    <td className="px-5 py-3"><div className="font-medium text-slate-800">{p?.name || 'Unknown'}</div><div className="text-xs text-slate-400">{p?.sku}</div></td>
+                    <td className="px-5 py-3 text-right">{fmtNum(s.qty)}</td>
+                    <td className="px-5 py-3 text-right">{fmtMoney(s.price)}</td>
+                    <td className="px-5 py-3 text-right font-semibold counter">{fmtMoney(s.qty*s.price)}</td>
+                    <td className="px-5 py-3 text-slate-500">{fmtDate(s.date)} <span className="text-xs text-slate-400">{new Date(s.date).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</span></td>
+                    <td className="px-5 py-3 text-right"><button onClick={()=>{ if(confirm('Delete this sale and restore stock?')) api.deleteSale(s.id); }} className="w-8 h-8 rounded-lg hover:bg-rose-50 text-rose-500 magnetic ripple"><i className="fa-solid fa-trash text-xs"></i></button></td>
+                  </tr>
+                ); })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      <Modal open={open} onClose={()=>setOpen(false)} title="Record sale">
+        <SaleForm products={products} onSave={(form)=>{ const ok = api.recordSale(form); if(ok) setOpen(false); }} onCancel={()=>setOpen(false)} />
+      </Modal>
+    </div>
+  );
+}
+
+function SaleForm({ products, onSave, onCancel }) {
+  const [productId, setProductId] = useState(products[0]?.id || '');
+  const [qty, setQty] = useState(1);
+  const [price, setPrice] = useState(products[0]?.price || 0);
+  const [date, setDate] = useState(new Date().toISOString().slice(0,16));
+  const sel = products.find(p=>p.id===productId);
+  useEffect(() => { if (sel) setPrice(sel.price); }, [productId]);
+  return (
+    <div>
+      <Select label="Product" value={productId} onChange={e=>setProductId(e.target.value)}>
+        {products.map(p=> <option key={p.id} value={p.id} disabled={p.qty<=0}>{p.name} — {p.qty} {p.unit} in stock{p.qty<=0?' (out)':''}</option>)}
+      </Select>
+      <div className="grid grid-cols-2 gap-3">
+        <Input label="Quantity" type="number" min="1" max={sel?.qty} value={qty} onChange={e=>setQty(e.target.value)} />
+        <Input label="Unit price (₹)" type="number" value={price} onChange={e=>setPrice(e.target.value)} />
+      </div>
+      <Input label="Date & time" type="datetime-local" value={date} onChange={e=>setDate(e.target.value)} />
+      {sel && <div className="text-xs text-slate-500 mb-3">Available: <b>{sel.qty} {sel.unit}</b> · Min stock {sel.minStock}</div>}
+      <div className="flex justify-end gap-2 mt-2">
+        <Button variant="secondary" onClick={onCancel}>Cancel</Button>
+        <Button onClick={()=>onSave({ productId, qty: Number(qty), price: Number(price), date: new Date(date).toISOString() })}><i className="fa-solid fa-check"></i>Record</Button>
+      </div>
+    </div>
+  );
+}
+
+function Suppliers({ suppliers, products, api }) {
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  function openNew(){ setEditing({}); setOpen(true); }
+  function openEdit(s){ setEditing({...s}); setOpen(true); }
+  function close(){ setOpen(false); setEditing(null); }
+  function save(form){ if (!form.name) return; const payload = { name:form.name, contact:form.contact, phone:form.phone, email:form.email, city:form.city, notes:form.notes }; if (editing && editing.id) api.updateSupplier(editing.id, payload); else api.addSupplier(payload); close(); }
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <p className="text-sm text-slate-500">{suppliers.length} supplier{suppliers.length!==1?'s':''}</p>
+        <Button onClick={openNew} className="magnetic ripple"><i className="fa-solid fa-plus"></i>Add supplier</Button>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 stagger-in">
+        {suppliers.map(s => {
+          const prodCount = products.filter(p=>p.supplier===s.id).length;
+          return (
+            <div key={s.id} className="glass-card magnetic rounded-2xl p-5 shadow-layered border border-slate-100 transition-all">
+              <div className="flex items-start justify-between mb-3">
+                <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 text-white flex items-center justify-center"><i className="fa-solid fa-truck"></i></div>
+                <div className="flex gap-1">
+                  <button onClick={()=>openEdit(s)} className="w-8 h-8 rounded-lg hover:bg-brand-50 text-brand-600 magnetic ripple"><i className="fa-solid fa-pen text-xs"></i></button>
+                  <button onClick={()=>{ if(confirm('Delete supplier "'+s.name+'"?')) api.deleteSupplier(s.id); }} className="w-8 h-8 rounded-lg hover:bg-rose-50 text-rose-500 magnetic ripple"><i className="fa-solid fa-trash text-xs"></i></button>
+                </div>
+              </div>
+              <div className="font-semibold text-slate-800 mb-1">{s.name}</div>
+              <div className="text-xs text-slate-500 space-y-1">
+                {s.contact && <div><i className="fa-solid fa-user w-4 mr-1"></i>{s.contact}</div>}
+                {s.phone && <div><i className="fa-solid fa-phone w-4 mr-1"></i>{s.phone}</div>}
+                {s.email && <div><i className="fa-solid fa-at w-4 mr-1"></i>{s.email}</div>}
+                {s.city && <div><i className="fa-solid fa-location-dot w-4 mr-1"></i>{s.city}</div>}
+              </div>
+              <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between">
+                <span className="text-xs text-slate-400">{prodCount} product{prodCount!==1?'s':''}</span>
+                <Badge tone="green">Active</Badge>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <Modal open={open} onClose={close} title={editing && editing.id ? 'Edit supplier' : 'Add supplier'}>
+        <div className="space-y-4">
+          <Input label="Supplier name" value={editing?.name||''} onChange={e=>setEditing({...editing,name:e.target.value})} placeholder="e.g. FreshMart Distributors" />
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Contact person" value={editing?.contact||''} onChange={e=>setEditing({...editing,contact:e.target.value})} />
+            <Input label="Phone" value={editing?.phone||''} onChange={e=>setEditing({...editing,phone:e.target.value})} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Email" value={editing?.email||''} onChange={e=>setEditing({...editing,email:e.target.value})} />
+            <Input label="City" value={editing?.city||''} onChange={e=>setEditing({...editing,city:e.target.value})} />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={close}>Cancel</Button>
+            <Button onClick={()=>save(editing||{})}><i className="fa-solid fa-check"></i>Save</Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+}
+
+function Alerts({ products, suppliers, supById, avgDailySales, api }) {
+  const lowItems = products.filter(p => p.qty <= p.minStock);
+  const reorderList = lowItems.map(p => {
+    const avg = avgDailySales(p.id, 30);
+    const shortfall = p.minStock - p.qty;
+    const leadDemand = Math.ceil(avg * 7);
+    const suggested = Math.max(0, shortfall + leadDemand);
+    return { p, avg, suggested, supplier: supById[p.supplier] };
+  }).sort((a,b) => (a.p.qty - a.p.minStock) - (b.p.qty - b.p.minStock));
+  return (
+    <div className="space-y-4">
+      <div className="bg-gradient-to-r from-amber-50 to-rose-50 border border-amber-200 rounded-2xl p-5 flex items-center gap-4">
+        <div className="w-12 h-12 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center text-xl"><i className="fa-solid fa-triangle-exclamation"></i></div>
+        <div className="flex-1">
+          <h3 className="font-semibold text-slate-800">{lowItems.length} item{lowItems.length!==1?'s':''} need attention</h3>
+          <p className="text-sm text-slate-600">Products below their minimum stock level. Reorder quantities are suggested from average sales (last 30 days) plus a 7-day lead-time buffer.</p>
+        </div>
+      </div>
+      {reorderList.length===0 ? (
+        <div className="glass-card rounded-2xl shadow-layered border border-slate-100">
+          <Empty icon="fa-solid fa-circle-check" title="Everything is well stocked" sub="No reorder suggestions right now." />
+        </div>
+      ) : (
+        <div className="glass-card rounded-2xl shadow-layered border border-slate-100 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+                <tr>
+                  <th className="text-left px-5 py-3 font-semibold">Product</th>
+                  <th className="text-right px-5 py-3 font-semibold">On hand</th>
+                  <th className="text-right px-5 py-3 font-semibold">Min stock</th>
+                  <th className="text-right px-5 py-3 font-semibold">Avg / day</th>
+                  <th className="text-right px-5 py-3 font-semibold">Suggested reorder</th>
+                  <th className="text-left px-5 py-3 font-semibold">Supplier</th>
+                  <th className="text-right px-5 py-3 font-semibold">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reorderList.map(({p, avg, suggested, supplier}) => (
+                  <tr key={p.id} className="interactive-row magnetic border-t border-slate-100">
+                    <td className="px-5 py-3"><div className="font-medium text-slate-800">{p.name}</div><div className="text-xs text-slate-400">{p.sku}</div></td>
+                    <td className="px-5 py-3 text-right font-semibold text-rose-600">{fmtNum(p.qty)}</td>
+                    <td className="px-5 py-3 text-right text-slate-500">{fmtNum(p.minStock)}</td>
+                    <td className="px-5 py-3 text-right text-slate-500">{avg.toFixed(2)}</td>
+                    <td className="px-5 py-3 text-right"><span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-brand-100 text-brand-700 font-bold">{fmtNum(suggested)} {p.unit}</span></td>
+                    <td className="px-5 py-3 text-xs text-slate-600">{supplier?.name || '—'}<div className="text-slate-400">{supplier?.phone}</div></td>
+                    <td className="px-5 py-3 text-right"><Button variant="success" className="text-xs px-3 py-1.5 magnetic ripple" onClick={()=>api.adjustQty(p.id, suggested)}><i className="fa-solid fa-plus"></i>Restock</Button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PaymentModal({ open, onClose, sb, user, isPro, onActivate, onDeactivate }) {
-  const [plan, setPlan] = useState('monthly');
   const [method, setMethod] = useState('upi');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [plan, setPlan] = useState('monthly');
   const [paid, setPaid] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [upiId, setUpiId] = useState(() => {
-    try { const saved = (localStorage.getItem('stockpilot.upi.id') || '').trim(); if (saved) return saved; } catch (e) {}
-    return (UPI_ID && !/^your/i.test(UPI_ID)) ? UPI_ID : '';
-  });
-  const [upiDraft, setUpiDraft] = useState('');
-  const qrRef = useRef(null);
-
-  const plans = {
-    monthly: { name: 'Monthly', price: 499, period: '/mo' },
-    yearly: { name: 'Yearly', price: 4999, period: '/yr' }
-  };
+  const [loading, setLoading] = useState(false);
+  const [upiId, setUpiId] = useState(() => { try { return localStorage.getItem('stockpilot.upi.id') || ''; } catch(e) { return ''; } });
+  const plans = { monthly:{ name:'Monthly', price:199, period:'/mo' }, yearly:{ name:'Yearly', price:1788, period:'/yr', save:'Save 25%' } };
   const amount = plans[plan].price;
-  const upiReady = UPI_ID_RE.test(upiId);
-
-  // Reset transient state each time the modal opens.
-  useEffect(() => { if (open) { setPaid(false); setError(''); } }, [open]);
-
-  // Render the UPI QR for the currently selected plan.
-  useEffect(() => {
-    if (!open || method !== 'upi') return;
-    const el = qrRef.current;
-    if (!el) return;
-    el.innerHTML = '';
-    if (!upiReady) return;
-    const link = upiLink(upiId, amount, 'StockPilot Pro ' + plan);
-    if (window.QRCode) {
-      try {
-        new window.QRCode(el, { text: link, width: 168, height: 168, colorDark: '#0f172a', colorLight: '#ffffff', correctLevel: window.QRCode.CorrectLevel.M });
-      } catch (e) {
-        el.innerHTML = '<div style="font-size:11px;color:#94a3b8;padding:16px">QR unavailable — use the button below</div>';
-      }
-    } else {
-      el.innerHTML = '<div style="font-size:11px;color:#94a3b8;padding:16px">QR library not loaded — use the button below</div>';
-    }
-  }, [open, method, plan, amount, upiId, upiReady]);
-
-  async function pay() {
-    if (!RAZORPAY_KEY_ID || RAZORPAY_KEY_ID === 'YOUR_RAZORPAY_KEY_ID') {
-      setError('Please set your Razorpay Key ID in index.html (RAZORPAY_KEY_ID)');
-      return;
-    }
-    setLoading(true); setError('');
-    try {
-      const amt = amount * 100;
-      const options = {
-        key: RAZORPAY_KEY_ID,
-        amount: amt,
-        currency: 'INR',
-        name: 'StockPilot',
-        description: 'Pro subscription',
-        handler: function (response) {
-          alert('Payment successful! Payment ID: ' + response.razorpay_payment_id);
-          try { onActivate && onActivate(); } catch (e) {}
-          setLoading(false); onClose();
-        },
-        prefill: { email: user?.email || '', contact: user?.phone || '' },
-        theme: { color: '#6366f1' }
-      };
-      const rzp = new window.Razorpay(options);
-      rzp.on('payment.failed', function (response) {
-        setError('Payment failed: ' + response.error.description);
-        setLoading(false);
-      });
-      rzp.open();
-    } catch (e) { setError(e.message); setLoading(false); }
-  }
-
-  function openUpi(){
-    try { window.location.href = upiLink(upiId, amount, 'StockPilot Pro ' + plan); }
-    catch (e) { setError('Could not open a UPI app on this device.'); }
-  }
-  function copyLink(){
-    try { navigator.clipboard.writeText(upiLink(upiId, amount, 'StockPilot Pro ' + plan)); setCopied(true); setTimeout(()=>setCopied(false), 1500); } catch(e){}
-  }
-  function saveUpiId(){
-    const v = (upiDraft || '').trim();
-    if (!UPI_ID_RE.test(v)) { setError('Enter a valid UPI ID, e.g. 9876543210@ybl'); return; }
-    setError('');
-    setUpiId(v);
-    try { localStorage.setItem('stockpilot.upi.id', v); } catch (e) {}
-  }
-
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 fade-in" onClick={onClose}>
       <div className="absolute inset-0 bg-slate-900/40 modal-backdrop"></div>
-      <div className="relative bg-white rounded-2xl shadow-soft w-full max-w-md max-h-[92vh] overflow-auto" onClick={e=>e.stopPropagation()}>
+      <div className="relative bg-white rounded-2xl shadow-soft w-full max-w-md max-h-[92vh] overflow-auto pop-in" onClick={e=>e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <h3 className="text-lg font-semibold text-slate-800">{isPro ? 'Your Pro plan' : 'Upgrade to Pro'}</h3>
           <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400"><i className="fa-solid fa-xmark"></i></button>
         </div>
-
         {isPro ? (
           <div className="p-6 text-center">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-300 to-amber-500 text-slate-900 flex items-center justify-center text-2xl mx-auto mb-3"><i className="fa-solid fa-crown"></i></div>
@@ -859,7 +624,7 @@ function PaymentModal({ open, onClose, sb, user, isPro, onActivate, onDeactivate
               </ul>
             </div>
             <Button className="w-full mt-5 justify-center" onClick={onClose}>Done</Button>
-            <button onClick={()=>{ try { onDeactivate && onDeactivate(); } catch (e) {} }} className="text-xs text-slate-400 hover:text-rose-500 mt-3">Cancel Pro (demo)</button>
+            <button onClick={()=>{ try { onDeactivate && onDeactivate(); } catch(e){} }} className="text-xs text-slate-400 hover:text-rose-500 mt-3">Cancel Pro (demo)</button>
           </div>
         ) : paid ? (
           <div className="p-6 text-center">
@@ -878,7 +643,6 @@ function PaymentModal({ open, onClose, sb, user, isPro, onActivate, onDeactivate
                 </button>
               ))}
             </div>
-
             <div className="bg-slate-50 rounded-xl p-4 mb-4 text-sm text-slate-600">
               <div className="font-medium text-slate-700 mb-2">Pro features</div>
               <ul className="space-y-1.5">
@@ -888,70 +652,37 @@ function PaymentModal({ open, onClose, sb, user, isPro, onActivate, onDeactivate
                 <li><i className="fa-solid fa-check text-emerald-500 mr-2"></i>Priority support</li>
               </ul>
             </div>
-
-            {/* Payment method selector */}
-            <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl mb-4">
-              <button onClick={()=>setMethod('upi')} className={`py-2 rounded-lg text-sm font-medium transition ${method==='upi'?'bg-white shadow-sm text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
-                <i className="fa-solid fa-indian-rupee-sign mr-1.5"></i>UPI
-              </button>
-              <button onClick={()=>setMethod('card')} className={`py-2 rounded-lg text-sm font-medium transition ${method==='card'?'bg-white shadow-sm text-slate-800':'text-slate-500 hover:text-slate-700'}`}>
-                <i className="fa-regular fa-credit-card mr-1.5"></i>Card
-              </button>
+            <div className="grid grid-cols-2 gap-3 mb-4">
+              <button onClick={()=>setMethod('upi')} className={`p-3 rounded-xl border-2 text-center text-sm font-medium transition ${method==='upi'?'border-brand-500 bg-brand-50':'border-slate-200 hover:border-slate-300'}`}><i className="fa-solid fa-qrcode mr-1"></i>UPI</button>
+              <button onClick={()=>setMethod('card')} className={`p-3 rounded-xl border-2 text-center text-sm font-medium transition ${method==='card'?'border-brand-500 bg-brand-50':'border-slate-200 hover:border-slate-300'}`}><i className="fa-solid fa-credit-card mr-1"></i>Card</button>
             </div>
-
-            {error && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2 mb-3">{error}</div>}
-
-            {method === 'upi' ? (
-              upiReady ? (
-                <div className="text-center">
-                  <div ref={qrRef} className="mx-auto w-[168px] h-[168px] flex items-center justify-center bg-white rounded-xl border border-slate-200 overflow-hidden"></div>
-                  <p className="text-xs text-slate-500 mt-3">Scan with any UPI app — GPay, PhonePe, Paytm</p>
-                  <div className="text-sm text-slate-600 mt-1">Paying <span className="font-semibold text-slate-800">₹{amount}</span> to <span className="font-medium">{UPI_NAME}</span></div>
-                  <div className="text-xs text-slate-400 mt-0.5">UPI ID: {upiId} <button onClick={()=>{ setUpiDraft(upiId); setUpiId(''); }} className="text-brand-500 hover:text-brand-600 ml-1">change</button></div>
-                  <Button className="w-full mt-4 justify-center" onClick={openUpi}><i className="fa-solid fa-mobile-screen-button"></i>Pay ₹{amount} via UPI app</Button>
-                  <div className="flex items-center justify-center gap-4 mt-3">
-                    <button onClick={copyLink} className="text-xs text-slate-500 hover:text-slate-700">{copied ? 'Link copied!' : 'Copy payment link'}</button>
-                    <button onClick={()=>{ try { onActivate && onActivate(); } catch (e) {} setPaid(true); }} className="text-xs text-brand-600 hover:text-brand-700 font-medium">I've paid</button>
+            {method==='upi' ? (
+              <div>
+                <Input label="Your UPI ID (to receive payments)" value={upiId} onChange={e=>setUpiId(e.target.value)} placeholder="yourname@okhdfcbank" />
+                {upiId && (
+                  <div className="text-center mb-4">
+                    <div className="inline-block p-3 bg-white rounded-xl border border-slate-200"><div id="upi-qr"></div></div>
+                    <div className="text-xs text-slate-400 mt-2">Scan with any UPI app</div>
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-3"><i className="fa-solid fa-shield-halved mr-1"></i>Direct UPI — no card, no KYC needed</p>
-                </div>
-              ) : (
-                <div>
-                  <Input label="Your UPI ID (to receive payments)" placeholder="e.g. 9876543210@ybl" value={upiDraft} onChange={e=>setUpiDraft(e.target.value)} />
-                  <Button className="w-full justify-center" onClick={saveUpiId}><i className="fa-solid fa-check"></i>Save &amp; show QR</Button>
-                  <p className="text-[11px] text-slate-400 mt-3 text-center"><i className="fa-solid fa-shield-halved mr-1"></i>Stored only in your browser. No PAN / KYC needed.</p>
-                </div>
-              )
+                )}
+                <Button className="w-full justify-center magnetic ripple" onClick={()=>{ try { onActivate && onActivate(); } catch(e){} setPaid(true); }}><i className="fa-solid fa-check"></i>I've paid</Button>
+              </div>
             ) : (
-              <>
-                <Button onClick={pay} disabled={loading} className="w-full justify-center">
-                  {loading ? 'Opening checkout...' : <><i className="fa-solid fa-lock"></i>Pay ₹{amount}</>}
-                </Button>
-                <p className="text-xs text-slate-400 text-center mt-3">Test mode — use Razorpay test cards</p>
-              </>
+              <div>
+                <Input label="Card number" placeholder="4111 1111 1111 1111" />
+                <div className="grid grid-cols-2 gap-3">
+                  <Input label="Expiry" placeholder="MM/YY" />
+                  <Input label="CVV" placeholder="123" type="password" />
+                </div>
+                <Button className="w-full justify-center mt-4 magnetic ripple" onClick={()=>{ try { onActivate && onActivate(); } catch(e){} setPaid(true); }}><i className="fa-solid fa-lock"></i>Pay ₹{amount}</Button>
+              </div>
             )}
+            <p className="text-xs text-slate-400 mt-4 text-center">Demo mode — no real payment processed</p>
           </div>
         )}
       </div>
     </div>
   );
-}
-
-// ---------- Profile Modal ----------
-function fmtFullDate(v){
-  if (!v) return '—';
-  try { return new Date(v).toLocaleDateString(undefined, { year:'numeric', month:'short', day:'numeric' }); }
-  catch { return '—'; }
-}
-function ProviderBadge({ provider }) {
-  const p = (provider || '').toLowerCase();
-  const map = {
-    google: { icon:'fa-brands fa-google', label:'Google' },
-    github: { icon:'fa-brands fa-github', label:'GitHub' },
-    email:  { icon:'fa-solid fa-envelope', label:'Email' }
-  };
-  const it = map[p] || { icon:'fa-solid fa-user', label: provider ? provider[0].toUpperCase()+provider.slice(1) : 'Account' };
-  return <Badge tone="blue"><i className={it.icon}></i><span className="ml-1.5">{it.label}</span></Badge>;
 }
 
 function ProfileModal({ open, onClose, profile, user, isPro, onSignOut }) {
@@ -963,22 +694,15 @@ function ProfileModal({ open, onClose, profile, user, isPro, onSignOut }) {
   const provider = p.provider || (user && user.app_metadata && user.app_metadata.provider) || null;
   const created = p.created_at || (user && user.created_at) || null;
   const lastSeen = p.last_seen || null;
-
   if (!open) return null;
-
-  function copyId(){
-    try { navigator.clipboard.writeText(p.id || (user && user.id) || ''); setCopied(true); setTimeout(()=>setCopied(false), 1500); } catch(e){}
-  }
-
+  function copyId(){ try { navigator.clipboard.writeText(p.id || (user && user.id) || ''); setCopied(true); setTimeout(()=>setCopied(false), 1500); } catch(e){} }
   return (
     <Modal open={open} onClose={onClose} title="Your profile" width="max-w-md">
-      {/* Header card */}
       <div className="relative -m-6 mb-5 px-6 pt-6 pb-5 bg-gradient-to-br from-slate-900 to-slate-800 text-white overflow-hidden">
-        <div className="absolute -top-8 -right-8 w-32 h-32 rounded-full bg-brand-500/20 blur-2xl"></div>
+        <div className="absolute top-0 right-0 w-32 h-32 bg-brand-500/20 rounded-full blur-2xl"></div>
         <div className="relative flex items-center gap-4">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-400 to-brand-700 flex items-center justify-center text-white text-2xl font-bold overflow-hidden ring-4 ring-white/10 shrink-0">
-            {avatar ? <img src={avatar} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
-                    : (name || email || 'U').charAt(0).toUpperCase()}
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-400 to-brand-700 flex items-center justify-center text-2xl font-bold overflow-hidden ring-2 ring-white/10">
+            {avatar ? <img src={avatar} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" /> : (name || email || 'U').charAt(0).toUpperCase()}
           </div>
           <div className="min-w-0">
             <div className="text-lg font-bold truncate flex items-center gap-2">
@@ -989,8 +713,6 @@ function ProfileModal({ open, onClose, profile, user, isPro, onSignOut }) {
           </div>
         </div>
       </div>
-
-      {/* Rows */}
       <div className="space-y-3">
         <div className="flex items-center justify-between py-2.5 px-3.5 rounded-xl bg-slate-50">
           <span className="text-sm text-slate-500"><i className="fa-solid fa-crown w-4 mr-2 text-slate-400"></i>Plan</span>
@@ -1002,32 +724,23 @@ function ProfileModal({ open, onClose, profile, user, isPro, onSignOut }) {
         </div>
         <div className="flex items-center justify-between py-2.5 px-3.5 rounded-xl bg-slate-50">
           <span className="text-sm text-slate-500"><i className="fa-solid fa-right-to-bracket w-4 mr-2 text-slate-400"></i>Signed in with</span>
-          <ProviderBadge provider={provider} />
+          <span className="text-sm font-medium text-slate-800 capitalize">{provider || 'Google'}</span>
         </div>
-        <div className="flex items-center justify-between py-2.5 px-3.5 rounded-xl bg-slate-50">
-          <span className="text-sm text-slate-500"><i className="fa-solid fa-calendar w-4 mr-2 text-slate-400"></i>Member since</span>
-          <span className="text-sm font-medium text-slate-800">{fmtFullDate(created)}</span>
-        </div>
-        <div className="flex items-center justify-between py-2.5 px-3.5 rounded-xl bg-slate-50">
-          <span className="text-sm text-slate-500"><i className="fa-solid fa-clock w-4 mr-2 text-slate-400"></i>Last seen</span>
-          <span className="text-sm font-medium text-slate-800">{lastSeen ? new Date(lastSeen).toLocaleString() : 'Just now'}</span>
-        </div>
-        <button onClick={copyId} className="w-full flex items-center justify-between py-2.5 px-3.5 rounded-xl bg-slate-50 hover:bg-slate-100 transition">
-          <span className="text-sm text-slate-500"><i className="fa-solid fa-fingerprint w-4 mr-2 text-slate-400"></i>Account ID</span>
-          <span className="text-xs font-mono text-slate-600 truncate max-w-[55%]">
-            {copied ? 'Copied!' : (p.id || (user && user.id) || '').slice(0, 18) + '…'}
-          </span>
-        </button>
-
-        <div className="flex items-start gap-2.5 py-3 px-3.5 rounded-xl bg-emerald-50 border border-emerald-100">
-          <i className="fa-solid fa-shield-halved text-emerald-500 mt-0.5"></i>
-          <div className="text-xs text-emerald-800">
-            <span className="font-semibold">Private to this account.</span> Your inventory, sales and suppliers are isolated — no other login can see them.
+        {created && (
+          <div className="flex items-center justify-between py-2.5 px-3.5 rounded-xl bg-slate-50">
+            <span className="text-sm text-slate-500"><i className="fa-solid fa-calendar w-4 mr-2 text-slate-400"></i>Member since</span>
+            <span className="text-sm font-medium text-slate-800">{fmtDate(created)}</span>
           </div>
+        )}
+        <div className="flex items-center justify-between py-2.5 px-3.5 rounded-xl bg-slate-50">
+          <span className="text-sm text-slate-500"><i className="fa-solid fa-id-card w-4 mr-2 text-slate-400"></i>Account ID</span>
+          <button onClick={copyId} className="text-sm font-mono text-slate-600 hover:text-brand-600 transition">{copied ? '✓ Copied!' : (p.id || (user && user.id) || '').slice(0,12) + '…'}</button>
         </div>
       </div>
-
-      <div className="flex items-center gap-3 mt-6">
+      <div className="mt-5 p-4 rounded-xl bg-brand-50 border border-brand-100 text-xs text-brand-700">
+        <i className="fa-solid fa-shield-halved mr-1"></i> Private to this account. Your inventory, sales and suppliers are isolated.
+      </div>
+      <div className="flex gap-2 mt-5">
         <Button variant="secondary" className="flex-1 justify-center" onClick={onClose}><i className="fa-solid fa-xmark"></i>Close</Button>
         <Button variant="danger" className="flex-1 justify-center" onClick={()=>{ try { onSignOut && onSignOut(); } catch(e){} }}><i className="fa-solid fa-right-from-bracket"></i>Sign out</Button>
       </div>
@@ -1035,7 +748,6 @@ function ProfileModal({ open, onClose, profile, user, isPro, onSignOut }) {
   );
 }
 
-// ---------- App ----------
 function App() {
   const [data, setData] = useState(() => ({ products: [], suppliers: [], sales: [] }));
   const [view, setView] = useState('dashboard');
@@ -1046,136 +758,52 @@ function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [paymentModal, setPaymentModal] = useState(false);
-  const [profile, setProfile] = useState(null);        // row from the `profiles` table
+  const [profile, setProfile] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [isPro, setIsPro] = useState(false);            // local Pro entitlement, per account
-
+  const [isPro, setIsPro] = useState(false);
   useEffect(() => { sbRef.current = sbClient; }, [sbClient]);
   useEffect(() => { saveData(data, user?.id || 'anon'); }, [data, user?.id]);
-
-  // Auth state
   useEffect(() => {
     if (!sbClient) { setAuthLoading(false); return; }
     let cancelled = false;
-    // Wait a tick for Supabase to process the #access_token in the URL
     const timer = setTimeout(async () => {
-      try {
-        const { data } = await sbClient.auth.getSession();
-        if (!cancelled) {
-          setUser(data.session?.user || null);
-          setAuthLoading(false);
-        }
-      } catch (e) {
-        if (!cancelled) setAuthLoading(false);
-      }
+      try { const { data } = await sbClient.auth.getSession(); if (!cancelled) { setUser(data.session?.user || null); setAuthLoading(false); } } catch(e) { if (!cancelled) setAuthLoading(false); }
     }, 500);
-    const { data: { subscription } } = sbClient.auth.onAuthStateChange((_e, session) => {
-      if (!cancelled) setUser(session?.user || null);
-    });
+    const { data: { subscription } } = sbClient.auth.onAuthStateChange((_e, session) => { if (!cancelled) setUser(session?.user || null); });
     return () => { cancelled = true; clearTimeout(timer); subscription?.unsubscribe(); };
   }, [sbClient]);
-
-  // Fetch this user's data from Supabase (auto-seeds a fresh account)
   useEffect(() => {
-    const sb = sbClient;
-    const uidUser = user?.id;
+    const sb = sbClient; const uidUser = user?.id;
     if (!sb) { setData(loadData()); setSbStatus('local'); return; }
     if (!uidUser) { setData({ products: [], suppliers: [], sales: [] }); setSbStatus('connecting'); return; }
     let cancelled = false;
-    // Instant paint from this user's own cache, then refresh from the DB.
     const cached = loadCache(uidUser);
     if (cached) setData(cached);
     setSbStatus('connecting');
-    // Safety net: never leave the indicator stuck on "Connecting…".
     const guard = setTimeout(() => { if (!cancelled) setSbStatus(s => (s === 'connecting' ? 'error' : s)); }, 8000);
     (async () => {
       try {
         let loaded = await fetchAllFromSb(sb, uidUser);
         if (cancelled) return;
         if (!loaded) { setSbStatus('error'); return; }
-        // Connected as soon as we can read this user's rows.
         setSbStatus(loaded.scoped === false ? 'setup' : 'connected');
-        // New account → seed sample data in batched writes when the user has no stock/sales yet.
-        if (loaded.products.length === 0 && loaded.sales.length === 0) {
-          const seed = buildSeed(uidUser);
-          // If user_id isn't available yet (pre-migration), omit it so seeding can't fail.
-          const payload = (row) => { if (loaded.scoped !== false) return row; const c = { ...row }; delete c.user_id; return c; };
-          await upsertRow(sb, 'suppliers', seed.suppliers.map(s => payload(supplierToDb(s, uidUser))));
-          await upsertRow(sb, 'products', seed.products.map(p => payload(productToDb(p, uidUser))));
-          await upsertRow(sb, 'sales', seed.sales.map(s => payload(saleToDb(s, uidUser))));
-          loaded = { scoped: loaded.scoped, products: seed.products, suppliers: [...loaded.suppliers, ...seed.suppliers], sales: seed.sales };
-        }
+        if (loaded.products.length === 0 && loaded.sales.length === 0) { const seed = buildSeed(uidUser); await upsertRow(sb, 'suppliers', seed.suppliers.map(s => supplierToDb(s, uidUser))); await upsertRow(sb, 'products', seed.products.map(p => productToDb(p, uidUser))); await upsertRow(sb, 'sales', seed.sales.map(s => saleToDb(s, uidUser))); loaded = { scoped: loaded.scoped, products: seed.products, suppliers: [...loaded.suppliers, ...seed.suppliers], sales: seed.sales }; }
         if (cancelled) return;
         setData(loaded);
-      } catch (e) {
-        if (!cancelled) setSbStatus('error');
-      }
+      } catch(e) { if (!cancelled) setSbStatus('error'); }
     })();
     return () => { cancelled = true; clearTimeout(guard); };
-  }, [sbClient, user?.id]);
-
-  // Sync the signed-in user's details into the `profiles` table and show them in the UI.
-  // Fully guarded: if the table or policies aren't set up yet, the app keeps working.
-  useEffect(() => {
-    const sb = sbClient, u = user;
-    if (!sb || !u || !u.id) { setProfile(null); return; }
-    let cancelled = false;
-    (async () => {
-      try {
-        const md = u.user_metadata || {};
-        const am = u.app_metadata || {};
-        const row = {
-          id: u.id,
-          email: u.email || null,
-          full_name: md.full_name || md.name || null,
-          avatar_url: md.avatar_url || md.picture || null,
-          provider: am.provider || md.provider || null,
-          last_seen: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        };
-        // Ask for the stored row back so we can show created_at etc.
-        const { data: saved, error } = await sb.from('profiles').upsert(row, { onConflict: 'id' }).select().maybeSingle();
-        if (cancelled) return;
-        if (error) {
-          console.warn('profiles sync skipped:', error.message);
-          setProfile(row); // fall back to what we know from the session
-        } else {
-          setProfile(saved || row);
-        }
-      } catch (e) {
-        // Never let profile syncing break the app.
-        console.warn('profiles sync skipped:', (e && e.message) || e);
-        if (!cancelled) setProfile({ id: u.id, email: u.email || null, full_name: (u.user_metadata||{}).full_name || null, avatar_url: (u.user_metadata||{}).avatar_url || null, provider: (u.app_metadata||{}).provider || null });
-      }
-    })();
-    return () => { cancelled = true; };
   }, [sbClient, user]);
-
-  // Profile shown in the UI: preferred = the stored row, fallback = session metadata.
-  const prof = profile || (user ? {
-    id: user.id,
-    email: user.email || null,
-    full_name: (user.user_metadata || {}).full_name || (user.user_metadata || {}).name || null,
-    avatar_url: (user.user_metadata || {}).avatar_url || (user.user_metadata || {}).picture || null,
-    provider: (user.app_metadata || {}).provider || null,
-    created_at: user.created_at || null,
-    last_seen: null
-  } : null);
-
-  // Local Pro entitlement, scoped per account (so each login has its own).
+  const prof = profile || (user ? { id:user.id, email:user.email||null, full_name:(user.user_metadata||{}).full_name||(user.user_metadata||{}).name||null, avatar_url:(user.user_metadata||{}).avatar_url||(user.user_metadata||{}).picture||null, provider:(user.app_metadata||{}).provider||null, created_at:user.created_at||null, last_seen:null } : null);
   const proScope = user?.id || 'anon';
   useEffect(() => { setIsPro(loadPro(proScope)); }, [proScope]);
   const activatePro = useCallback(() => { savePro(proScope, true); setIsPro(true); }, [proScope]);
   const deactivatePro = useCallback(() => { savePro(proScope, false); setIsPro(false); }, [proScope]);
-
   const products = data.products;
   const suppliers = data.suppliers;
   const sales = data.sales;
-
   const supById = useMemo(() => Object.fromEntries(suppliers.map(s=>[s.id,s])), [suppliers]);
   const prodById = useMemo(() => Object.fromEntries(products.map(p=>[p.id,p])), [products]);
-
-  // computed analytics
   const stats = useMemo(() => {
     const low = products.filter(p => p.qty <= p.minStock && p.qty > 0);
     const out = products.filter(p => p.qty <= 0);
@@ -1185,13 +813,7 @@ function App() {
     const revenueAll = sales.reduce((a,s)=>a+s.qty*s.price,0);
     return { low, out, value, soldToday, revenueToday, revenueAll, totalProducts: products.length };
   }, [products, sales]);
-
-  const avgDailySales = useCallback((productId, days=30) => {
-    const cutoff = Date.now() - days*86400000;
-    const sold = sales.filter(s=>s.productId===productId && new Date(s.date).getTime()>=cutoff).reduce((a,s)=>a+s.qty,0);
-    return sold / days;
-  }, [sales]);
-
+  const avgDailySales = useCallback((productId, days=30) => { const cutoff = Date.now() - days*86400000; const sold = sales.filter(s=>s.productId===productId && new Date(s.date).getTime()>=cutoff).reduce((a,s)=>a+s.qty,0); return sold / days; }, [sales]);
   const nav = [
     { id:'dashboard', label:'Dashboard', icon:'fa-solid fa-gauge-high' },
     { id:'inventory', label:'Inventory', icon:'fa-solid fa-boxes-stacked' },
@@ -1199,194 +821,49 @@ function App() {
     { id:'suppliers', label:'Suppliers', icon:'fa-solid fa-truck' },
     { id:'alerts', label:'Low Stock & Reorder', icon:'fa-solid fa-triangle-exclamation' }
   ];
-
   function crumb() { return nav.find(n=>n.id===view)?.label || 'Dashboard'; }
-
-  // Minimal, accurate connection indicator
-  const sbInfo = sbStatus === 'connected' ? { dot: 'bg-emerald-500', text: 'Synced', cls: 'text-emerald-400', tip: 'Synced with your Supabase account' }
-    : sbStatus === 'setup' ? { dot: 'bg-amber-500', text: 'Setup needed', cls: 'text-amber-300', tip: 'Run supabase-migration-multiuser.sql so each account is isolated' }
-    : sbStatus === 'error' ? { dot: 'bg-rose-500', text: 'Sync failed', cls: 'text-rose-300', tip: 'Could not reach Supabase' }
-    : sbStatus === 'local' ? { dot: 'bg-slate-400', text: 'Local only', cls: 'text-slate-400', tip: 'Supabase not loaded — using local storage' }
-    : { dot: 'bg-amber-500', text: 'Connecting…', cls: 'text-amber-300', tip: 'Connecting to Supabase' };
-
-  // data mutators
+  const sbInfo = sbStatus === 'connected' ? { dot:'bg-emerald-500', text:'Synced', cls:'text-emerald-400' }
+    : sbStatus === 'setup' ? { dot:'bg-amber-500', text:'Setup needed', cls:'text-amber-300' }
+    : sbStatus === 'error' ? { dot:'bg-rose-500', text:'Sync failed', cls:'text-rose-300' }
+    : sbStatus === 'local' ? { dot:'bg-slate-400', text:'Local only', cls:'text-slate-400' }
+    : { dot:'bg-amber-500', text:'Connecting…', cls:'text-amber-300' };
   const api = {
-    addProduct: (p) => {
-      const newP = {...p, id: uid()};
-      setData(d => ({...d, products:[...d.products, newP]}));
-      const sb = sbRef.current, u = user?.id;
-      if (sb && u) upsertRow(sb, 'products', productToDb(newP, u)).catch(e=>console.error(e));
-      return newP;
-    },
-    updateProduct: (id, patch) => {
-      setData(d => {
-        const products = d.products.map(p => p.id===id ? {...p,...patch} : p);
-        const updated = products.find(p=>p.id===id);
-        const sb = sbRef.current, u = user?.id;
-        if (sb && u && updated) upsertRow(sb, 'products', productToDb(updated, u)).catch(e=>console.error(e));
-        return {...d, products};
-      });
-    },
-    deleteProduct: (id) => {
-      setData(d => ({...d, products:d.products.filter(p=>p.id!==id)}));
-      const sb = sbRef.current;
-      if (sb) deleteRow(sb, 'products', id).catch(e=>console.error(e));
-    },
-    adjustQty: (id, delta) => {
-      setData(d => {
-        const products = d.products.map(p => p.id===id ? {...p, qty:Math.max(0,p.qty+delta)} : p);
-        const updated = products.find(p=>p.id===id);
-        const sb = sbRef.current, u = user?.id;
-        if (sb && u && updated) upsertRow(sb, 'products', productToDb(updated, u)).catch(e=>console.error(e));
-        return {...d, products};
-      });
-    },
-    addSupplier: (s) => {
-      const newS = {...s, id: uid()};
-      setData(d => ({...d, suppliers:[...d.suppliers, newS]}));
-      const sb = sbRef.current, u = user?.id;
-      if (sb && u) upsertRow(sb, 'suppliers', supplierToDb(newS, u)).catch(e=>console.error(e));
-      return newS;
-    },
-    updateSupplier: (id, patch) => {
-      setData(d => {
-        const suppliers = d.suppliers.map(s => s.id===id ? {...s,...patch} : s);
-        const updated = suppliers.find(s=>s.id===id);
-        const sb = sbRef.current, u = user?.id;
-        if (sb && u && updated) upsertRow(sb, 'suppliers', supplierToDb(updated, u)).catch(e=>console.error(e));
-        return {...d, suppliers};
-      });
-    },
-    deleteSupplier: (id) => {
-      setData(d => ({
-        ...d,
-        suppliers: d.suppliers.filter(s=>s.id!==id),
-        products: d.products.map(p => p.supplier===id ? {...p, supplier:null} : p)
-      }));
-      const sb = sbRef.current;
-      if (sb) deleteRow(sb, 'suppliers', id).catch(e=>console.error(e));
-    },
-    recordSale: (sale) => {
-      const p = products.find(x=>x.id===sale.productId);
-      if (!p) return;
-      const qty = Number(sale.qty);
-      if (qty > p.qty) { alert('Not enough stock. Available: ' + p.qty); return false; }
-      const newSale = { id:uid(), productId:sale.productId, qty, price: Number(sale.price), date: sale.date || new Date().toISOString() };
-      setData(d => ({
-        ...d,
-        products: d.products.map(x=>x.id===sale.productId?{...x, qty:x.qty-qty}:x),
-        sales: [newSale, ...d.sales]
-      }));
-      const sb = sbRef.current, u = user?.id;
-      if (sb && u) {
-        upsertRow(sb, 'products', productToDb({...p, qty: p.qty-qty}, u)).catch(e=>console.error(e));
-        upsertRow(sb, 'sales', saleToDb(newSale, u)).catch(e=>console.error(e));
-      }
-      return true;
-    },
-    deleteSale: (id) => {
-      const s = sales.find(x=>x.id===id);
-      if (!s) return;
-      const p = products.find(x=>x.id===s.productId);
-      setData(d => ({
-        ...d,
-        products: d.products.map(pr=>pr.id===s.productId?{...pr, qty:pr.qty+s.qty}:pr),
-        sales: d.sales.filter(x=>x.id!==id)
-      }));
-      const sb = sbRef.current, u = user?.id;
-      if (sb && u) {
-        deleteRow(sb, 'sales', id).catch(e=>console.error(e));
-        if (p) upsertRow(sb, 'products', productToDb({...p, qty: p.qty + s.qty}, u)).catch(e=>console.error(e));
-      }
-    },
-    reset: async () => {
-      if (!confirm('Reset all data to sample? This clears your changes.')) return;
-      const sb = sbRef.current, u = user?.id;
-      if (sb && u) {
-        try {
-          await sb.from('sales').delete().eq('user_id', u);
-          await sb.from('products').delete().eq('user_id', u);
-          await sb.from('suppliers').delete().eq('user_id', u);
-          const seed = buildSeed(u);
-          await upsertRow(sb, 'suppliers', seed.suppliers.map(s => supplierToDb(s, u)));
-          await upsertRow(sb, 'products', seed.products.map(p => productToDb(p, u)));
-          await upsertRow(sb, 'sales', seed.sales.map(s => saleToDb(s, u)));
-          setData({ products: seed.products, suppliers: seed.suppliers, sales: seed.sales });
-        } catch (e) { alert('Reset failed: ' + e.message); }
-      } else {
-        setData(JSON.parse(JSON.stringify(seedData)));
-      }
-    },
-    pushToSupabase: async () => {
-      const sb = sbRef.current, u = user?.id;
-      if (!sb || !u) { alert('Sign in first.'); return; }
-      if (!confirm('Push current local data to Supabase (upsert)?')) return;
-      try {
-        await upsertRow(sb,'suppliers', data.suppliers.map(s => supplierToDb(s, u)));
-        await upsertRow(sb,'products', data.products.map(p => productToDb(p, u)));
-        await upsertRow(sb,'sales', data.sales.map(s => saleToDb(s, u)));
-        alert('Pushed to Supabase successfully.');
-      } catch (e) { alert('Push failed: ' + e.message); }
-    },
-    exportData: () => {
-      const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href=url; a.download='stockpilot-data.json'; a.click(); URL.revokeObjectURL(url);
-    },
-    importData: (file) => {
-      const reader = new FileReader();
-      reader.onload = (e) => { try { const d = JSON.parse(e.target.result); setData(d); } catch { alert('Invalid JSON'); } };
-      reader.readAsText(file);
-    }
+    addProduct: (p) => { const newP = {...p, id:uid()}; setData(d=>({...d,products:[...d.products,newP]})); const sb=sbRef.current,u=user?.id; if(sb&&u) upsertRow(sb,'products',productToDb(newP,u)).catch(e=>console.error(e)); return newP; },
+    updateProduct: (id, patch) => { setData(d=>{const products=d.products.map(p=>p.id===id?{...p,...patch}:p); const updated=products.find(p=>p.id===id); const sb=sbRef.current,u=user?.id; if(sb&&u&&updated) upsertRow(sb,'products',productToDb(updated,u)).catch(e=>console.error(e)); return {...d,products};}); },
+    deleteProduct: (id) => { setData(d=>({...d,products:d.products.filter(p=>p.id!==id)})); const sb=sbRef.current; if(sb) deleteRow(sb,'products',id).catch(e=>console.error(e)); },
+    adjustQty: (id, delta) => { setData(d=>{const products=d.products.map(p=>p.id===id?{...p,qty:Math.max(0,p.qty+delta)}:p); const updated=products.find(p=>p.id===id); const sb=sbRef.current,u=user?.id; if(sb&&u&&updated) upsertRow(sb,'products',productToDb(updated,u)).catch(e=>console.error(e)); return {...d,products};}); },
+    addSupplier: (s) => { const newS={...s,id:uid()}; setData(d=>({...d,suppliers:[...d.suppliers,newS]})); const sb=sbRef.current,u=user?.id; if(sb&&u) upsertRow(sb,'suppliers',supplierToDb(newS,u)).catch(e=>console.error(e)); return newS; },
+    updateSupplier: (id, patch) => { setData(d=>{const suppliers=d.suppliers.map(s=>s.id===id?{...s,...patch}:s); const updated=suppliers.find(s=>s.id===id); const sb=sbRef.current,u=user?.id; if(sb&&u&&updated) upsertRow(sb,'suppliers',supplierToDb(updated,u)).catch(e=>console.error(e)); return {...d,suppliers};}); },
+    deleteSupplier: (id) => { setData(d=>({...d,suppliers:d.suppliers.filter(s=>s.id!==id),products:d.products.map(p=>p.supplier===id?{...p,supplier:null}:p)})); const sb=sbRef.current; if(sb) deleteRow(sb,'suppliers',id).catch(e=>console.error(e)); },
+    recordSale: (sale) => { const p=products.find(x=>x.id===sale.productId); if(!p) return; const qty=Number(sale.qty); if(qty>p.qty) return false; const newSale={id:uid(),productId:sale.productId,qty,price:Number(sale.price),date:sale.date||new Date().toISOString()}; setData(d=>({...d,products:d.products.map(x=>x.id===sale.productId?{...x,qty:x.qty-qty}:x),sales:[newSale,...d.sales]})); const sb=sbRef.current,u=user?.id; if(sb&&u){ upsertRow(sb,'products',productToDb({...p,qty:p.qty-qty},u)).catch(e=>console.error(e)); upsertRow(sb,'sales',saleToDb(newSale,u)).catch(e=>console.error(e)); } return true; },
+    deleteSale: (id) => { const s=sales.find(x=>x.id===id); if(!s) return; const p=products.find(x=>x.id===s.productId); setData(d=>({...d,products:d.products.map(pr=>pr.id===s.productId?{...pr,qty:pr.qty+s.qty}:pr),sales:d.sales.filter(x=>x.id!==id)})); const sb=sbRef.current,u=user?.id; if(sb&&u){ deleteRow(sb,'sales',id).catch(e=>console.error(e)); if(p) upsertRow(sb,'products',productToDb({...p,qty:p.qty+s.qty},u)).catch(e=>console.error(e)); } },
+    reset: async () => { if(!confirm('Reset all data to sample?')) return; const sb=sbRef.current,u=user?.id; if(sb&&u){ try{ await sb.from('sales').delete().eq('user_id',u); await sb.from('products').delete().eq('user_id',u); await sb.from('suppliers').delete().eq('user_id',u); const seed=buildSeed(u); await upsertRow(sb,'suppliers',seed.suppliers.map(s=>supplierToDb(s,u))); await upsertRow(sb,'products',seed.products.map(p=>productToDb(p,u))); await upsertRow(sb,'sales',seed.sales.map(s=>saleToDb(s,u))); setData({products:seed.products,suppliers:seed.suppliers,sales:seed.sales}); }catch(e){} } else { setData(JSON.parse(JSON.stringify(seedData))); } },
+    pushToSupabase: async () => { const sb=sbRef.current,u=user?.id; if(!sb||!u){alert('Sign in first.');return;} if(!confirm('Push current local data to Supabase?')) return; try{ await upsertRow(sb,'suppliers',data.suppliers.map(s=>supplierToDb(s,u))); await upsertRow(sb,'products',data.products.map(p=>productToDb(p,u))); await upsertRow(sb,'sales',data.sales.map(s=>saleToDb(s,u))); alert('Pushed to Supabase successfully.'); }catch(e){alert('Push failed: '+e.message);} },
+    exportData: () => { const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='stockpilot-data.json'; a.click(); URL.revokeObjectURL(url); },
+    importData: (file) => { const reader=new FileReader(); reader.onload=(e)=>{try{const d=JSON.parse(e.target.result); setData(d);}catch{alert('Invalid JSON');}}; reader.readAsText(file); }
   };
-
-  // Show login screen if not authenticated
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-        <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-brand-400 to-brand-700 flex items-center justify-center text-white shadow-soft animate-pulse">
-          <i className="fa-solid fa-warehouse text-xl"></i>
-        </div>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <LoginScreen sb={sbClient} />;
-  }
-
+  if (authLoading) return <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900"><div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-brand-400 to-brand-700 flex items-center justify-center text-white shadow-soft animate-pulse"><i className="fa-solid fa-warehouse text-xl"></i></div></div>;
+  if (!user) return <LoginScreen sb={sbClient} />;
   return (
     <div className="flex h-screen overflow-hidden">
-      {/* Sidebar */}
       <aside className={`fixed md:static inset-y-0 left-0 z-40 w-64 bg-gradient-to-b from-slate-900 to-slate-800 text-slate-200 flex flex-col transform ${mobileOpen?'translate-x-0':'-translate-x-full md:translate-x-0'} transition-transform slide-in`}>
         <div className="px-6 py-5 flex items-center gap-3 border-b border-white/5">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 flex items-center justify-center text-white shadow-lg">
-            <i className="fa-solid fa-warehouse text-lg"></i>
-          </div>
-          <div>
-            <div className="font-bold text-white text-lg leading-tight">StockPilot</div>
-            <div className="text-xs text-slate-400">Inventory &amp; Supply</div>
-          </div>
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 flex items-center justify-center text-white shadow-lg"><i className="fa-solid fa-warehouse text-lg"></i></div>
+          <div><div className="font-bold text-white text-lg leading-tight">StockPilot</div><div className="text-xs text-slate-400">Inventory &amp; Supply</div></div>
         </div>
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {nav.map(n => (
-            <button key={n.id} onClick={()=>{setView(n.id); setMobileOpen(false);}}
-              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition ${view===n.id?'bg-white/10 text-white shadow-inner':'hover:bg-white/5 text-slate-300'}`}>
-              <i className={`${n.icon} w-5 text-center`}></i>{n.label}
-              {n.id==='alerts' && stats.low.length+stats.out.length>0 && (
-                <span className="ml-auto bg-rose-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{stats.low.length+stats.out.length}</span>
-              )}
+        <nav className="flex-1 px-3 py-4 space-y-1 stagger-in">
+          {nav.map((n, idx) => (
+            <button key={n.id} onClick={()=>{setView(n.id); setMobileOpen(false);}} className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer magnetic ${view===n.id?'bg-white/10 text-white shadow-inner':'hover:bg-white/5 text-slate-300'}`} style={{ transitionDelay: `${idx * 40}ms` }}>
+              <i className={`${n.icon} w-5 text-center`}></i>
+              <span className="flex-1 text-left truncate">{n.label}</span>
+              {n.id==='alerts' && stats.low.length+stats.out.length>0 && <span className="bg-rose-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{stats.low.length+stats.out.length}</span>}
             </button>
           ))}
         </nav>
         <div className="px-4 py-4 border-t border-white/5 space-y-2">
-          <button onClick={()=>setProfileOpen(true)} className="w-full flex items-center gap-3 px-2.5 py-2.5 rounded-xl hover:bg-white/5 transition text-left" title="View profile">
+          <button onClick={()=>setProfileOpen(true)} className="w-full flex items-center gap-3 px-2.5 py-2.5 rounded-xl hover:bg-white/5 transition text-left">
             <div className="w-9 h-9 rounded-full bg-gradient-to-br from-brand-400 to-brand-700 flex items-center justify-center text-white text-sm font-bold overflow-hidden shrink-0 ring-2 ring-white/10">
-              {prof?.avatar_url ? (
-                <img src={prof.avatar_url} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
-              ) : (
-                (prof?.full_name || prof?.email || 'U').charAt(0).toUpperCase()
-              )}
+              {prof?.avatar_url ? <img src={prof.avatar_url} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" /> : (prof?.full_name || prof?.email || 'U').charAt(0).toUpperCase()}
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-sm font-medium text-white truncate flex items-center gap-1.5">
@@ -1407,48 +884,28 @@ function App() {
           <button onClick={api.reset} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-slate-400 hover:bg-white/5 transition"><i className="fa-solid fa-rotate-left"></i>Reset sample data</button>
         </div>
       </aside>
-
       {mobileOpen && <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={()=>setMobileOpen(false)}></div>}
-
-      {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
         <header className="bg-white border-b border-slate-200 px-4 md:px-8 py-3 flex items-center gap-4">
           <button className="md:hidden w-9 h-9 rounded-lg hover:bg-slate-100 flex items-center justify-center" onClick={()=>setMobileOpen(true)}><i className="fa-solid fa-bars"></i></button>
-          <div>
-            <div className="text-xs text-slate-400 font-medium">StockPilot</div>
-            <h1 className="text-xl font-bold text-slate-800 leading-tight">{crumb()}</h1>
-          </div>
+          <div><div className="text-xs text-slate-400 font-medium">StockPilot</div><h1 className="text-xl font-bold text-slate-800 leading-tight">{crumb()}</h1></div>
           <div className="ml-auto flex items-center gap-2">
-            <div className="hidden md:flex items-center gap-2 px-3 py-2 bg-slate-100 rounded-xl text-sm text-slate-500 w-64">
-              <i className="fa-solid fa-magnifying-glass text-slate-400"></i>
-              <input placeholder="Search products..." className="bg-transparent outline-none flex-1 text-slate-700" onChange={e=>{
-                if (view!=='inventory') setView('inventory');
-                window.dispatchEvent(new CustomEvent('stockpilot:search', {detail:e.target.value}));
-              }} />
-            </div>
-            <button onClick={()=>setView('alerts')} className="relative w-9 h-9 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-500">
+            <button onClick={()=>setView('alerts')} className="relative w-9 h-9 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-500 magnetic">
               <i className="fa-solid fa-bell"></i>
               {(stats.low.length+stats.out.length)>0 && <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-white"></span>}
             </button>
-            <button onClick={()=>setPaymentModal(true)} title={isPro ? 'Pro active — manage plan' : 'Upgrade to Pro'} className={`h-9 px-3 rounded-xl text-sm font-semibold transition flex items-center gap-1.5 ${isPro ? 'bg-gradient-to-r from-amber-300 to-amber-500 text-slate-900 shadow-sm' : 'bg-gradient-to-r from-brand-500 to-brand-700 text-white hover:opacity-90'}`}>
+            <button onClick={()=>setPaymentModal(true)} title={isPro ? 'Pro active — manage plan' : 'Upgrade to Pro'} className={`h-9 px-3 rounded-xl text-sm font-semibold transition flex items-center gap-1.5 magnetic ${isPro ? 'bg-gradient-to-r from-amber-300 to-amber-500 text-slate-900 shadow-sm' : 'bg-gradient-to-r from-brand-500 to-brand-700 text-white hover:opacity-90'}`}>
               <i className="fa-solid fa-crown text-xs"></i><span className="hidden sm:inline">{isPro ? 'PRO' : 'Pro'}</span>
             </button>
             <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
-              <button onClick={()=>setProfileOpen(true)} className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-400 to-brand-700 flex items-center justify-center text-white text-xs font-bold overflow-hidden hover:ring-2 hover:ring-brand-300 transition" title="View profile">
-                {prof?.avatar_url ? (
-                  <img src={prof.avatar_url} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
-                ) : (
-                  (prof?.full_name || prof?.email || 'U').charAt(0).toUpperCase()
-                )}
+              <button onClick={()=>setProfileOpen(true)} className="w-8 h-8 rounded-full bg-gradient-to-br from-brand-400 to-brand-700 flex items-center justify-center text-white text-xs font-bold overflow-hidden hover:ring-2 hover:ring-brand-300 transition magnetic" title="View profile">
+                {prof?.avatar_url ? <img src={prof.avatar_url} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" /> : (prof?.full_name || prof?.email || 'U').charAt(0).toUpperCase()}
               </button>
               <span className="text-sm text-slate-600 hidden sm:inline">{prof?.full_name || prof?.email || 'User'}</span>
-              <button onClick={()=>sbClient.auth.signOut()} className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400" title="Logout">
-                <i className="fa-solid fa-right-from-bracket text-sm"></i>
-              </button>
+              <button onClick={()=>sbClient.auth.signOut()} className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400 magnetic" title="Logout"><i className="fa-solid fa-right-from-bracket text-sm"></i></button>
             </div>
           </div>
         </header>
-
         <main className="flex-1 overflow-y-auto scrollbar p-4 md:p-8">
           <div className="max-w-7xl mx-auto fade-in" key={view}>
             {view==='dashboard' && <Dashboard stats={stats} products={products} sales={sales} suppliers={suppliers} setView={setView} prodById={prodById} supById={supById} avgDailySales={avgDailySales} api={api} />}
@@ -1459,607 +916,182 @@ function App() {
           </div>
         </main>
       </div>
-
-      <Assistant products={products} suppliers={suppliers} sales={sales} stats={stats} prodById={prodById} supById={supById} setView={setView} user={user} />
-
       <PaymentModal open={paymentModal} onClose={()=>setPaymentModal(false)} sb={sbClient} user={user} isPro={isPro} onActivate={activatePro} onDeactivate={deactivatePro} />
-
       <ProfileModal open={profileOpen} onClose={()=>setProfileOpen(false)} profile={prof} user={user} isPro={isPro} onSignOut={()=>sbClient.auth.signOut()} />
+      <Assistant products={products} sales={sales} stats={stats} prodById={prodById} supById={supById} setView={setView} user={user} />
     </div>
   );
 }
 
-// ---------- Dashboard ----------
-function Dashboard({ stats, products, sales, suppliers, setView, prodById, supById, avgDailySales, api }) {
-  const chartRef = useRef(null);
-  const chartInstance = useRef(null);
-  useEffect(() => {
-    if (!chartRef.current) return;
-    if (chartInstance.current) chartInstance.current.destroy();
-    const labels = [], data = [];
-    for (let i=6; i>=0; i--) {
-      const d = daysAgo(i);
-      const key = d.toDateString();
-      labels.push(d.toLocaleDateString('en-IN',{weekday:'short'}));
-      data.push(sales.filter(s=>new Date(s.date).toDateString()===key).reduce((a,s)=>a+s.qty*s.price,0));
+// ---------- AI Assistant ----------
+function Assistant({ products, sales, stats, prodById, supById, setView, user }) {
+  const [open, setOpen] = useState(false);
+  const [input, setInput] = useState('');
+  const [messages, setMessages] = useState([
+    { role: 'ai', text: "Hi! I'm StockPilot AI 👋 I can help with:\n• Math calculations (try '15% of 2000')\n• Product & stock info\n• Sales & revenue data\n• Navigation help\n\nWhat would you like to know?" }
+  ]);
+  const [typing, setTyping] = useState(false);
+  const scrollRef = useRef(null);
+
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, typing]);
+
+  function getAIResponse(q) {
+    const msg = q.toLowerCase().trim();
+
+    // Math: "X% of Y"
+    let m = msg.match(/(\d+(?:\.\d+)?)\s*%\s*of\s*(\d+(?:\.\d+)?)/);
+    if (m) { const pct = parseFloat(m[1]), num = parseFloat(m[2]); return `✅ ${pct}% of ${fmtNum(num)} = **${fmtNum(Math.round(pct / 100 * num))}**`; }
+
+    // Math: basic operations
+    m = msg.match(/(\d+(?:\.\d+)?)\s*([+\-*/x×÷])\s*(\d+(?:\.\d+)?)/);
+    if (m) {
+      const a = parseFloat(m[1]), b = parseFloat(m[3]), op = m[2];
+      let result = op === '+' ? a + b : op === '-' ? a - b : (op === '*' || op === 'x' || op === '×') ? a * b : b !== 0 ? a / b : 'undefined (division by zero)';
+      return `✅ ${a} ${op} ${b} = **${typeof result === 'number' ? fmtNum(Math.round(result * 100) / 100) : result}**`;
     }
-    chartInstance.current = new Chart(chartRef.current, {
-      type:'bar',
-      data: { labels, datasets:[{ label:'Revenue', data, backgroundColor:'#6366f1', borderRadius:8, hoverBackgroundColor:'#4338ca' }] },
-      options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}, tooltip:{callbacks:{label:c=>'₹'+c.parsed.y.toLocaleString('en-IN')}}}, scales:{y:{beginAtZero:true, ticks:{callback:v=>'₹'+v}, grid:{color:'#f1f5f9'}}, x:{grid:{display:false}}} }
-    });
-    return ()=>{ if(chartInstance.current) chartInstance.current.destroy(); };
-  }, [sales]);
 
-  const recent = sales.slice(0,6);
-  const topProducts = useMemo(() => {
-    const map = {};
-    sales.forEach(s => { map[s.productId] = (map[s.productId]||0) + s.qty; });
-    return Object.entries(map).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([id,q])=>({p:prodById[id],q})).filter(x=>x.p);
-  }, [sales, prodById]);
+    // Math: "what is X" or "calculate X"
+    m = msg.match(/(?:what is|calculate|calc|compute|solve)?\s*(\d+(?:\.\d+)?)\s*([+\-*/x×÷])\s*(\d+(?:\.\d+)?)/);
+    if (m && !msg.includes('%')) {
+      const a = parseFloat(m[1]), b = parseFloat(m[3]), op = m[2];
+      let result = op === '+' ? a + b : op === '-' ? a - b : (op === '*' || op === 'x' || op === '×') ? a * b : b !== 0 ? a / b : 'undefined';
+      return `✅ ${a} ${op} ${b} = **${typeof result === 'number' ? fmtNum(Math.round(result * 100) / 100) : result}**`;
+    }
 
-  const kpis = [
-    { label:'Total Products', value:fmtNum(stats.totalProducts), icon:'fa-solid fa-box', tone:'from-brand-500 to-brand-700', sub: (stats.low.length+stats.out.length)+' need attention' },
-    { label:'Low / Out of Stock', value:fmtNum(stats.low.length+stats.out.length), icon:'fa-solid fa-triangle-exclamation', tone:'from-amber-400 to-rose-500', sub: stats.out.length+' out of stock', click:()=>setView('alerts') },
-    { label:'Sold Today', value:fmtNum(stats.soldToday), icon:'fa-solid fa-cart-shopping', tone:'from-emerald-400 to-teal-500', sub:fmtMoney(stats.revenueToday)+' revenue' },
-    { label:'Inventory Value', value:fmtMoney(stats.value), icon:'fa-solid fa-indian-rupee-sign', tone:'from-violet-500 to-purple-700', sub:'at cost price' }
-  ];
+    // Total products
+    if (msg.includes('how many products') || msg.includes('total products') || msg.includes('product count')) {
+      return `📦 You have **${fmtNum(stats.totalProducts)} products** in your inventory.`;
+    }
 
-  return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        {kpis.map((k,i)=>(
-          <div key={i} onClick={k.click} className={`kpi bg-white rounded-2xl p-5 shadow-sm border border-slate-100 ${k.click?'cursor-pointer':''}`}>
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="text-xs font-medium text-slate-500 uppercase tracking-wide">{k.label}</div>
-                <div className="text-2xl font-bold text-slate-800 mt-2">{k.value}</div>
-                <div className="text-xs text-slate-400 mt-1">{k.sub}</div>
-              </div>
-              <div className={`w-11 h-11 rounded-xl bg-gradient-to-br ${k.tone} text-white flex items-center justify-center shadow-soft`}>
-                <i className={k.icon}></i>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+    // Low stock
+    if (msg.includes('low stock') || msg.includes('which products are low') || msg.includes('out of stock')) {
+      const items = [...stats.out, ...stats.low];
+      if (items.length === 0) return '✅ No products are low on stock right now!';
+      return `⚠️ **${items.length} product${items.length!==1?'s':''}** need attention:\n${items.map(p => `• ${p.name} — ${p.qty} ${p.unit} left`).join('\n')}\n\nGo to **Low Stock & Reorder** for suggestions.`;
+    }
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="font-semibold text-slate-800">Revenue — Last 7 days</h3>
-              <p className="text-xs text-slate-400">Daily sales revenue from recorded transactions</p>
-            </div>
-            <Badge tone="blue"><i className="fa-solid fa-chart-column mr-1"></i>Trend</Badge>
-          </div>
-          <div className="h-64"><canvas ref={chartRef}></canvas></div>
-        </div>
+    // Revenue
+    if (msg.includes('revenue') || msg.includes('total sales') || msg.includes('how much have i sold')) {
+      return `💰 **Sales Summary:**\n• Total revenue: **${fmtMoney(Math.round(stats.revenueAll))}**\n• Today: **${fmtMoney(Math.round(stats.revenueToday))}**\n• Units sold: **${fmtNum(sales.reduce((a,s)=>a+s.qty,0))}**`;
+    }
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-          <h3 className="font-semibold text-slate-800 mb-3">Low stock alerts</h3>
-          {stats.low.length+stats.out.length===0 ? (
-            <Empty icon="fa-solid fa-circle-check" title="All stocked up" sub="No items below minimum level." />
-          ) : (
-            <div className="space-y-2 max-h-64 overflow-y-auto scrollbar">
-              {[...stats.out, ...stats.low].map(p => (
-                <div key={p.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 hover:bg-slate-100 transition">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-slate-700 truncate">{p.name}</div>
-                    <div className="text-xs text-slate-400">{p.qty} {p.unit} left · min {p.minStock}</div>
-                  </div>
-                  <Badge tone={p.qty<=0?'red':'amber'}>{p.qty<=0?'Out':'Low'}</Badge>
-                </div>
-              ))}
-            </div>
-          )}
-          <button onClick={()=>setView('alerts')} className="mt-3 w-full text-sm text-brand-600 font-medium hover:underline">View reorder suggestions →</button>
-        </div>
-      </div>
+    // Top selling
+    if (msg.includes('top sell') || msg.includes('best sell') || msg.includes('most sold')) {
+      const map = {};
+      sales.forEach(s => { map[s.productId] = (map[s.productId]||0) + s.qty; });
+      const top = Object.entries(map).sort((a,b)=>b[1]-a[1]).slice(0,3).map(([id,q]) => ({name: prodById[id]?.name || 'Unknown', qty: q}));
+      return `🏆 **Top selling products:**\n${top.map((t,i) => `${i+1}. ${t.name} — ${fmtNum(t.qty)} sold`).join('\n')}`;
+    }
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-          <h3 className="font-semibold text-slate-800 mb-3">Recent sales</h3>
-          {recent.length===0 ? <Empty icon="fa-solid fa-receipt" title="No sales yet" sub="Record a sale to see activity here." /> : (
-            <div className="divide-y divide-slate-100">
-              {recent.map(s => {
-                const p = prodById[s.productId];
-                return (
-                  <div key={s.id} className="flex items-center justify-between py-2.5">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-9 h-9 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center text-sm"><i className="fa-solid fa-bag-shopping"></i></div>
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-slate-700 truncate">{p?.name || 'Unknown'}</div>
-                        <div className="text-xs text-slate-400">{s.qty} × {fmtMoney(s.price)} · {fmtDate(s.date)}</div>
-                      </div>
-                    </div>
-                    <div className="text-sm font-semibold text-slate-800">{fmtMoney(s.qty*s.price)}</div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+    // Inventory value
+    if (msg.includes('inventory value') || msg.includes('stock value') || msg.includes('worth')) {
+      return `💎 Your inventory is worth approximately **${fmtMoney(Math.round(stats.value))}** at cost price.`;
+    }
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-          <h3 className="font-semibold text-slate-800 mb-3">Top selling products</h3>
-          {topProducts.length===0 ? <Empty icon="fa-solid fa-trophy" title="No data yet" sub="Sales will build this list." /> : (
-            <div className="space-y-3">
-              {topProducts.map((t,i) => {
-                const max = topProducts[0].q;
-                return (
-                  <div key={t.p.id}>
-                    <div className="flex items-center justify-between text-sm mb-1">
-                      <span className="font-medium text-slate-700 truncate">{i+1}. {t.p.name}</span>
-                      <span className="text-slate-500">{fmtNum(t.q)} sold</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-                      <div className="h-full bg-gradient-to-r from-brand-400 to-brand-600 rounded-full" style={{width:`${(t.q/max)*100}%`}}></div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+    // Profit calculation
+    if (msg.includes('profit')) {
+      const revenue = stats.revenueAll;
+      const cogs = sales.reduce((a,s) => a + (prodById[s.productId]?.cost||0) * s.qty, 0);
+      const profit = revenue - cogs;
+      const margin = revenue > 0 ? (profit / revenue * 100).toFixed(1) : 0;
+      return `📈 **Profit Analysis:**\n• Revenue: ${fmtMoney(Math.round(revenue))}\n• Cost: ${fmtMoney(Math.round(cogs))}\n• **Profit: ${fmtMoney(Math.round(profit))}**\n• Margin: ${margin}%`;
+    }
 
-// ---------- Inventory ----------
-function Inventory({ products, suppliers, supById, api }) {
-  const [q, setQ] = useState('');
-  const [cat, setCat] = useState('all');
-  const [editing, setEditing] = useState(null); // product or 'new'
-  const [open, setOpen] = useState(false);
+    // Navigation help
+    if (msg.includes('how to add') || msg.includes('add product') || msg.includes('new product')) {
+      return `➕ To add a product:\n1. Go to **Inventory** (left sidebar)\n2. Click **"Add product"** button\n3. Fill in name, SKU, quantity, price\n4. Click **Save**\n\nThat's it! 🎉`;
+    }
+    if (msg.includes('how to record') || msg.includes('add sale') || msg.includes('new sale')) {
+      return `🛒 To record a sale:\n1. Go to **Sales** (left sidebar)\n2. Click **"Record sale"**\n3. Select product, enter quantity & price\n4. Click **Record**\n\nThe stock updates automatically! ✅`;
+    }
+    if (msg.includes('how to add supplier') || msg.includes('new supplier')) {
+      return `🚛 To add a supplier:\n1. Go to **Suppliers** (left sidebar)\n2. Click **"Add supplier"**\n3. Fill in name, contact, phone\n4. Click **Save**`;
+    }
 
-  // listen to global search
-  useEffect(() => {
-    function h(e){ setQ(e.detail||''); }
-    window.addEventListener('stockpilot:search', h);
-    return () => window.removeEventListener('stockpilot:search', h);
-  }, []);
+    // Help
+    if (msg.includes('help') || msg.includes('what can you do') || msg.includes('features')) {
+      return `🤖 I can help you with:\n\n• **Math**: "15% of 2000", "100 + 50", "80/4"\n• **Inventory**: "How many products?", "Inventory value"\n• **Sales**: "Total revenue", "Top selling products"\n• **Low stock": "Which products are low?"\n• **Profit**: "Show profit"\n• **Navigation**: "How to add a product?"\n\nJust ask naturally! 😊`;
+    }
 
-  const cats = useMemo(() => ['all', ...Array.from(new Set(products.map(p=>p.category)))], [products]);
+    // Greetings
+    if (msg.includes('hello') || msg.includes('hi') || msg.includes('hey')) {
+      return `Hello! 👋 How can I help you today? Try asking me about your inventory, sales, or do a quick calculation!`;
+    }
 
-  const filtered = useMemo(() => products.filter(p => {
-    const matchQ = !q || p.name.toLowerCase().includes(q.toLowerCase()) || p.sku.toLowerCase().includes(q.toLowerCase());
-    const matchC = cat==='all' || p.category===cat;
-    return matchQ && matchC;
-  }), [products,q,cat]);
+    // Default
+    return `🤔 I'm not sure about that yet. Try asking me:\n• "15% of 2000" — for math\n• "How many products?" — for inventory\n• "Total revenue" — for sales\n• "What can you do?" — for help\n\nOr type "help" to see all my features!`;
+  }
 
-  function openNew(){ setEditing({}); setOpen(true); }
-  function openEdit(p){ setEditing({...p}); setOpen(true); }
-  function close(){ setOpen(false); setEditing(null); }
-  function save(form){
-    if (!form.name || !form.sku) { alert('Name and SKU are required'); return; }
-    const payload = {
-      name: form.name, sku: form.sku, category: form.category || 'General',
-      supplier: form.supplier || null,
-      qty: Number(form.qty||0), unit: form.unit || 'pcs', minStock: Number(form.minStock||0),
-      price: Number(form.price||0), cost: Number(form.cost||0)
-    };
-    if (editing && editing.id) api.updateProduct(editing.id, payload);
-    else api.addProduct(payload);
-    close();
+  function send() {
+    const text = input.trim();
+    if (!text) return;
+    setMessages(m => [...m, { role: 'user', text }]);
+    setInput('');
+    setTyping(true);
+    setTimeout(() => {
+      const reply = getAIResponse(text);
+      setMessages(m => [...m, { role: 'ai', text: reply }]);
+      setTyping(false);
+    }, 600);
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
-        <div className="flex gap-2 flex-1">
-          <div className="relative flex-1 max-w-md">
-            <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
-            <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search by name or SKU..." className="w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 bg-white focus:border-brand-400 focus:ring-2 focus:ring-brand-100 outline-none text-sm" />
-          </div>
-          <select value={cat} onChange={e=>setCat(e.target.value)} className="px-3 py-2.5 rounded-xl border border-slate-200 bg-white text-sm focus:border-brand-400 outline-none">
-            {cats.map(c=> <option key={c} value={c}>{c==='all'?'All categories':c}</option>)}
-          </select>
-        </div>
-        <Button onClick={openNew}><i className="fa-solid fa-plus"></i>Add product</Button>
-      </div>
+    <>
+      {/* FAB */}
+      <button onClick={() => setOpen(!open)} className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-2xl bg-gradient-to-br from-brand-500 to-brand-700 text-white shadow-soft flex items-center justify-center text-xl magnetic" title="AI Assistant">
+        <i className={`fa-solid ${open ? 'fa-xmark' : 'fa-robot'}`}></i>
+      </button>
 
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        {filtered.length===0 ? <Empty icon="fa-solid fa-box-open" title="No products found" sub="Try a different search or add a product." /> : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
-                <tr>
-                  <th className="text-left px-5 py-3 font-semibold">Product</th>
-                  <th className="text-left px-5 py-3 font-semibold">Category</th>
-                  <th className="text-left px-5 py-3 font-semibold">Supplier</th>
-                  <th className="text-right px-5 py-3 font-semibold">Qty</th>
-                  <th className="text-right px-5 py-3 font-semibold">Min</th>
-                  <th className="text-right px-5 py-3 font-semibold">Price</th>
-                  <th className="text-center px-5 py-3 font-semibold">Status</th>
-                  <th className="text-right px-5 py-3 font-semibold">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(p => {
-                  const status = p.qty<=0 ? ['red','Out of stock'] : p.qty<=p.minStock ? ['amber','Low stock'] : ['green','In stock'];
-                  return (
-                    <tr key={p.id} className="table-row border-t border-slate-100">
-                      <td className="px-5 py-3">
-                        <div className="font-medium text-slate-800">{p.name}</div>
-                        <div className="text-xs text-slate-400">{p.sku} · {p.unit}</div>
-                      </td>
-                      <td className="px-5 py-3"><Badge tone="blue">{p.category}</Badge></td>
-                      <td className="px-5 py-3 text-slate-500 text-xs">{supById[p.supplier]?.name || '—'}</td>
-                      <td className="px-5 py-3 text-right font-semibold text-slate-800">{fmtNum(p.qty)}</td>
-                      <td className="px-5 py-3 text-right text-slate-500">{fmtNum(p.minStock)}</td>
-                      <td className="px-5 py-3 text-right text-slate-700">{fmtMoney(p.price)}</td>
-                      <td className="px-5 py-3 text-center"><Badge tone={status[0]}>{status[1]}</Badge></td>
-                      <td className="px-5 py-3 text-right">
-                        <div className="inline-flex items-center gap-1">
-                          <button title="Decrease" onClick={()=>api.adjustQty(p.id,-1)} className="w-7 h-7 rounded-lg hover:bg-slate-100 text-slate-500"><i className="fa-solid fa-minus text-xs"></i></button>
-                          <button title="Increase" onClick={()=>api.adjustQty(p.id,1)} className="w-7 h-7 rounded-lg hover:bg-slate-100 text-slate-500"><i className="fa-solid fa-plus text-xs"></i></button>
-                          <button title="Edit" onClick={()=>openEdit(p)} className="w-7 h-7 rounded-lg hover:bg-brand-50 text-brand-600"><i className="fa-solid fa-pen text-xs"></i></button>
-                          <button title="Delete" onClick={()=>{ if(confirm('Delete '+p.name+'?')) api.deleteProduct(p.id); }} className="w-7 h-7 rounded-lg hover:bg-rose-50 text-rose-500"><i className="fa-solid fa-trash text-xs"></i></button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <Modal open={open} onClose={close} title={editing && editing.id ? 'Edit product' : 'Add product'}>
-        <ProductForm initial={editing} suppliers={suppliers} onSave={save} onCancel={close} />
-      </Modal>
-    </div>
-  );
-}
-
-function ProductForm({ initial, suppliers, onSave, onCancel }) {
-  const [form, setForm] = useState(initial && initial.id ? {
-    name:initial.name, sku:initial.sku, category:initial.category, supplier:initial.supplier,
-    qty:initial.qty, unit:initial.unit, minStock:initial.minStock, price:initial.price, cost:initial.cost
-  } : { name:'', sku:'', category:'Groceries', supplier: suppliers[0]?.id, qty:0, unit:'pcs', minStock:5, price:0, cost:0 });
-  const set = (k,v) => setForm(f=>({...f,[k]:v}));
-  return (
-    <div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Input label="Product name" value={form.name} onChange={e=>set('name',e.target.value)} placeholder="e.g. Basmati Rice 5kg" />
-        <Input label="SKU" value={form.sku} onChange={e=>set('sku',e.target.value)} placeholder="GR-001" />
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Input label="Category" value={form.category} onChange={e=>set('category',e.target.value)} placeholder="Groceries" />
-        <Select label="Supplier" value={form.supplier||''} onChange={e=>set('supplier',e.target.value)}>
-          <option value="">None</option>
-          {suppliers.map(s=> <option key={s.id} value={s.id}>{s.name}</option>)}
-        </Select>
-      </div>
-      <div className="grid grid-cols-3 gap-3">
-        <Input label="Quantity" type="number" value={form.qty} onChange={e=>set('qty',e.target.value)} />
-        <Input label="Unit" value={form.unit} onChange={e=>set('unit',e.target.value)} placeholder="pcs" />
-        <Input label="Min stock" type="number" value={form.minStock} onChange={e=>set('minStock',e.target.value)} />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <Input label="Selling price (₹)" type="number" value={form.price} onChange={e=>set('price',e.target.value)} />
-        <Input label="Cost price (₹)" type="number" value={form.cost} onChange={e=>set('cost',e.target.value)} />
-      </div>
-      <div className="flex justify-end gap-2 mt-2">
-        <Button variant="secondary" onClick={onCancel}>Cancel</Button>
-        <Button onClick={()=>onSave(form)}><i className="fa-solid fa-check"></i>Save</Button>
-      </div>
-    </div>
-  );
-}
-
-// ---------- Sales ----------
-function Sales({ products, sales, prodById, api }) {
-  const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState('all');
-
-  const filtered = useMemo(() => {
-    if (filter==='all') return sales;
-    const days = Number(filter);
-    const cutoff = Date.now() - days*86400000;
-    return sales.filter(s => new Date(s.date).getTime() >= cutoff);
-  }, [sales, filter]);
-
-  const totalRevenue = filtered.reduce((a,s)=>a+s.qty*s.price,0);
-  const totalQty = filtered.reduce((a,s)=>a+s.qty,0);
-
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-slate-500">Showing:</span>
-          {[['all','All time'],['7','Last 7 days'],['30','Last 30 days']].map(([v,l])=>(
-            <button key={v} onClick={()=>setFilter(v)} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${filter===v?'bg-brand-600 text-white':'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>{l}</button>
-          ))}
-        </div>
-        <Button onClick={()=>setOpen(true)}><i className="fa-solid fa-plus"></i>Record sale</Button>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100"><div className="text-xs text-slate-500 font-medium uppercase">Transactions</div><div className="text-2xl font-bold mt-1">{fmtNum(filtered.length)}</div></div>
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100"><div className="text-xs text-slate-500 font-medium uppercase">Units sold</div><div className="text-2xl font-bold mt-1">{fmtNum(totalQty)}</div></div>
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100"><div className="text-xs text-slate-500 font-medium uppercase">Revenue</div><div className="text-2xl font-bold mt-1">{fmtMoney(totalRevenue)}</div></div>
-      </div>
-
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-        {filtered.length===0 ? <Empty icon="fa-solid fa-receipt" title="No sales recorded" sub="Click 'Record sale' to log a transaction." /> : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
-                <tr>
-                  <th className="text-left px-5 py-3 font-semibold">Product</th>
-                  <th className="text-right px-5 py-3 font-semibold">Qty</th>
-                  <th className="text-right px-5 py-3 font-semibold">Unit price</th>
-                  <th className="text-right px-5 py-3 font-semibold">Total</th>
-                  <th className="text-left px-5 py-3 font-semibold">Date</th>
-                  <th className="text-right px-5 py-3 font-semibold">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(s => {
-                  const p = prodById[s.productId];
-                  return (
-                    <tr key={s.id} className="table-row border-t border-slate-100">
-                      <td className="px-5 py-3">
-                        <div className="font-medium text-slate-800">{p?.name || 'Unknown'}</div>
-                        <div className="text-xs text-slate-400">{p?.sku}</div>
-                      </td>
-                      <td className="px-5 py-3 text-right">{fmtNum(s.qty)}</td>
-                      <td className="px-5 py-3 text-right">{fmtMoney(s.price)}</td>
-                      <td className="px-5 py-3 text-right font-semibold">{fmtMoney(s.qty*s.price)}</td>
-                      <td className="px-5 py-3 text-slate-500">{fmtDate(s.date)} <span className="text-xs text-slate-400">{new Date(s.date).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</span></td>
-                      <td className="px-5 py-3 text-right">
-                        <button onClick={()=>{ if(confirm('Delete this sale and restore stock?')) api.deleteSale(s.id); }} className="w-8 h-8 rounded-lg hover:bg-rose-50 text-rose-500"><i className="fa-solid fa-trash text-xs"></i></button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <Modal open={open} onClose={()=>setOpen(false)} title="Record sale">
-        <SaleForm products={products} onSave={(form)=>{ const ok = api.recordSale(form); if(ok) setOpen(false); }} onCancel={()=>setOpen(false)} />
-      </Modal>
-    </div>
-  );
-}
-
-function SaleForm({ products, onSave, onCancel }) {
-  const [productId, setProductId] = useState(products[0]?.id || '');
-  const [qty, setQty] = useState(1);
-  const [price, setPrice] = useState(products[0]?.price || 0);
-  const [date, setDate] = useState(new Date().toISOString().slice(0,16));
-
-  const sel = products.find(p=>p.id===productId);
-  useEffect(() => {
-    if (sel) setPrice(sel.price);
-  }, [productId]);
-
-  return (
-    <div>
-      <Select label="Product" value={productId} onChange={e=>setProductId(e.target.value)}>
-        {products.map(p=> <option key={p.id} value={p.id} disabled={p.qty<=0}>{p.name} — {p.qty} {p.unit} in stock{p.qty<=0?' (out)':''}</option>)}
-      </Select>
-      <div className="grid grid-cols-2 gap-3">
-        <Input label="Quantity" type="number" min="1" max={sel?.qty} value={qty} onChange={e=>setQty(e.target.value)} />
-        <Input label="Unit price (₹)" type="number" value={price} onChange={e=>setPrice(e.target.value)} />
-      </div>
-      <Input label="Date & time" type="datetime-local" value={date} onChange={e=>setDate(e.target.value)} />
-      {sel && <div className="text-xs text-slate-500 mb-3">Available: <b>{sel.qty} {sel.unit}</b> · Min stock {sel.minStock}</div>}
-      <div className="flex justify-end gap-2 mt-2">
-        <Button variant="secondary" onClick={onCancel}>Cancel</Button>
-        <Button onClick={()=>onSave({ productId, qty: Number(qty), price: Number(price), date: new Date(date).toISOString() })}><i className="fa-solid fa-check"></i>Record</Button>
-      </div>
-    </div>
-  );
-}
-
-// ---------- Suppliers ----------
-function Suppliers({ suppliers, products, api }) {
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [selected, setSelected] = useState(null);
-
-  function openNew(){ setEditing({}); setOpen(true); }
-  function openEdit(s){ setEditing({...s}); setOpen(true); }
-  function close(){ setOpen(false); setEditing(null); }
-  function save(form){
-    if (!form.name) { alert('Supplier name required'); return; }
-    const payload = { name:form.name, contact:form.contact, phone:form.phone, email:form.email, city:form.city, notes:form.notes };
-    if (editing && editing.id) api.updateSupplier(editing.id, payload);
-    else api.addSupplier(payload);
-    close();
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-slate-500">{suppliers.length} suppliers registered</div>
-        <Button onClick={openNew}><i className="fa-solid fa-plus"></i>Add supplier</Button>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {suppliers.map(s => {
-          const prods = products.filter(p=>p.supplier===s.id);
-          return (
-            <div key={s.id} className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 hover:shadow-soft transition">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 text-white flex items-center justify-center font-bold">{s.name.charAt(0)}</div>
-                  <div>
-                    <div className="font-semibold text-slate-800">{s.name}</div>
-                    <div className="text-xs text-slate-400">{s.city}</div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button title="Edit" onClick={()=>openEdit(s)} className="w-7 h-7 rounded-lg hover:bg-slate-100 text-slate-400"><i className="fa-solid fa-pen text-xs"></i></button>
-                  <button title="Delete" onClick={()=>{ if(confirm('Delete supplier "'+s.name+'"? Products linked to it will be unassigned.')) api.deleteSupplier(s.id); }} className="w-7 h-7 rounded-lg hover:bg-rose-50 text-rose-500"><i className="fa-solid fa-trash text-xs"></i></button>
-                </div>
-              </div>
-              <div className="mt-4 space-y-1.5 text-sm text-slate-600">
-                <div className="flex items-center gap-2"><i className="fa-solid fa-user text-slate-400 w-4"></i>{s.contact || '—'}</div>
-                <div className="flex items-center gap-2"><i className="fa-solid fa-phone text-slate-400 w-4"></i>{s.phone || '—'}</div>
-                <div className="flex items-center gap-2"><i className="fa-solid fa-envelope text-slate-400 w-4"></i>{s.email || '—'}</div>
-              </div>
-              {s.notes && <div className="mt-3 text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">{s.notes}</div>}
-              <div className="mt-4 flex items-center justify-between">
-                <span className="text-xs text-slate-400">{prods.length} products supplied</span>
-                <button onClick={()=>setSelected(s.id)} className="text-xs text-brand-600 font-medium hover:underline">View products →</button>
-              </div>
+      {/* Chat panel */}
+      {open && (
+        <div className="fixed bottom-24 right-6 z-50 w-[92vw] max-w-[400px] h-[540px] max-h-[74vh] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden fade-in">
+          {/* Header */}
+          <div className="flex items-center gap-3 px-4 py-3.5 bg-gradient-to-r from-brand-600 to-brand-700 text-white">
+            <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center"><i className="fa-solid fa-robot"></i></div>
+            <div className="flex-1">
+              <div className="font-semibold text-sm">StockPilot AI</div>
+              <div className="text-xs text-white/70">Ask me anything about your inventory</div>
             </div>
-          );
-        })}
-      </div>
-
-      {selected && (
-        <Modal open={!!selected} onClose={()=>setSelected(null)} title={`Products from ${suppliers.find(s=>s.id===selected)?.name}`}>
-          <div className="space-y-2">
-            {products.filter(p=>p.supplier===selected).length===0 ? <Empty icon="fa-solid fa-box-open" title="No products linked" sub="Assign products to this supplier from Inventory." /> :
-              products.filter(p=>p.supplier===selected).map(p => (
-                <div key={p.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50">
-                  <div>
-                    <div className="text-sm font-medium text-slate-700">{p.name}</div>
-                    <div className="text-xs text-slate-400">{p.sku} · {p.qty} {p.unit}</div>
-                  </div>
-                  <Badge tone={p.qty<=0?'red':p.qty<=p.minStock?'amber':'green'}>{p.qty<=0?'Out':p.qty<=p.minStock?'Low':'OK'}</Badge>
-                </div>
-              ))
-            }
+            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
           </div>
-        </Modal>
-      )}
 
-      <Modal open={open} onClose={close} title={editing && editing.id ? 'Edit supplier' : 'Add supplier'}>
-        <SupplierForm initial={editing} onSave={save} onCancel={close} />
-      </Modal>
-    </div>
-  );
-}
+          {/* Messages */}
+          <div ref={scrollRef} className="flex-1 overflow-y-auto scrollbar p-4 space-y-3 text-sm">
+            {messages.map((m, i) => (
+              <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl whitespace-pre-wrap ${m.role === 'user' ? 'bg-brand-600 text-white rounded-br-md' : 'bg-slate-100 text-slate-700 rounded-bl-md'}`}>
+                  {m.text.split('\n').map((line, j) => (
+                    <span key={j}>{line.startsWith('**') ? <strong>{line.replace(/\*\*/g, '')}</strong> : line}{j < m.text.split('\n').length - 1 && <br />}</span>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {typing && (
+              <div className="flex justify-start">
+                <div className="bg-slate-100 px-4 py-3 rounded-2xl rounded-bl-md flex gap-1">
+                  <span className="w-2 h-2 rounded-full bg-slate-400 animate-bounce" style={{animationDelay:'0ms'}}></span>
+                  <span className="w-2 h-2 rounded-full bg-slate-400 animate-bounce" style={{animationDelay:'150ms'}}></span>
+                  <span className="w-2 h-2 rounded-full bg-slate-400 animate-bounce" style={{animationDelay:'300ms'}}></span>
+                </div>
+              </div>
+            )}
+          </div>
 
-function SupplierForm({ initial, onSave, onCancel }) {
-  const [form, setForm] = useState(initial && initial.id ? {
-    name:initial.name, contact:initial.contact, phone:initial.phone, email:initial.email, city:initial.city, notes:initial.notes
-  } : { name:'', contact:'', phone:'', email:'', city:'', notes:'' });
-  const set = (k,v) => setForm(f=>({...f,[k]:v}));
-  return (
-    <div>
-      <Input label="Supplier name" value={form.name} onChange={e=>set('name',e.target.value)} placeholder="FreshMart Distributors" />
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Input label="Contact person" value={form.contact} onChange={e=>set('contact',e.target.value)} />
-        <Input label="City" value={form.city} onChange={e=>set('city',e.target.value)} />
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Input label="Phone" value={form.phone} onChange={e=>set('phone',e.target.value)} />
-        <Input label="Email" type="email" value={form.email} onChange={e=>set('email',e.target.value)} />
-      </div>
-      <Textarea label="Notes" rows={2} value={form.notes} onChange={e=>set('notes',e.target.value)} placeholder="Categories supplied, lead time..." />
-      <div className="flex justify-end gap-2 mt-2">
-        <Button variant="secondary" onClick={onCancel}>Cancel</Button>
-        <Button onClick={()=>onSave(form)}><i className="fa-solid fa-check"></i>Save</Button>
-      </div>
-    </div>
-  );
-}
+          {/* Quick chips */}
+          <div className="px-3 pt-2 pb-1 flex gap-1.5 overflow-x-auto scrollbar border-t border-slate-100">
+            {['What can you do?', 'Total revenue', 'Low stock items', 'Top sellers', '15% of 2000'].map(chip => (
+              <button key={chip} onClick={() => { setInput(chip); setTimeout(() => { setMessages(m => [...m, { role: 'user', text: chip }]); setTyping(true); setTimeout(() => { setMessages(m => [...m, { role: 'ai', text: getAIResponse(chip) }]); setTyping(false); }, 600); }, 50); }} className="shrink-0 text-xs px-2.5 py-1.5 rounded-full bg-brand-50 text-brand-600 hover:bg-brand-100 transition">{chip}</button>
+            ))}
+          </div>
 
-// ---------- Alerts & Reorder ----------
-function Alerts({ products, suppliers, supById, avgDailySales, api }) {
-  const lowItems = products.filter(p => p.qty <= p.minStock);
-  const reorderList = lowItems.map(p => {
-    const avg = avgDailySales(p.id, 30);
-    const shortfall = p.minStock - p.qty;
-    const leadDemand = Math.ceil(avg * 7);
-    const suggested = Math.max(0, shortfall + leadDemand);
-    return { p, avg, suggested, supplier: supById[p.supplier] };
-  }).sort((a,b) => (a.p.qty - a.p.minStock) - (b.p.qty - b.p.minStock));
-
-  const [po, setPo] = useState(null);
-
-  return (
-    <div className="space-y-4">
-      <div className="bg-gradient-to-r from-amber-50 to-rose-50 border border-amber-200 rounded-2xl p-5 flex items-center gap-4">
-        <div className="w-12 h-12 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center text-xl"><i className="fa-solid fa-triangle-exclamation"></i></div>
-        <div className="flex-1">
-          <h3 className="font-semibold text-slate-800">{lowItems.length} item{lowItems.length!==1?'s':''} need attention</h3>
-          <p className="text-sm text-slate-600">Products below their minimum stock level. Reorder quantities are suggested from average sales (last 30 days) plus a 7-day lead-time buffer.</p>
-        </div>
-      </div>
-
-      {reorderList.length===0 ? (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100">
-          <Empty icon="fa-solid fa-circle-check" title="Everything is well stocked" sub="No reorder suggestions right now." />
-        </div>
-      ) : (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
-                <tr>
-                  <th className="text-left px-5 py-3 font-semibold">Product</th>
-                  <th className="text-right px-5 py-3 font-semibold">On hand</th>
-                  <th className="text-right px-5 py-3 font-semibold">Min stock</th>
-                  <th className="text-right px-5 py-3 font-semibold">Avg / day</th>
-                  <th className="text-right px-5 py-3 font-semibold">Suggested reorder</th>
-                  <th className="text-left px-5 py-3 font-semibold">Supplier</th>
-                  <th className="text-right px-5 py-3 font-semibold">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reorderList.map(({p, avg, suggested, supplier}) => (
-                  <tr key={p.id} className="table-row border-t border-slate-100">
-                    <td className="px-5 py-3">
-                      <div className="font-medium text-slate-800">{p.name}</div>
-                      <div className="text-xs text-slate-400">{p.sku}</div>
-                    </td>
-                    <td className="px-5 py-3 text-right font-semibold text-rose-600">{fmtNum(p.qty)}</td>
-                    <td className="px-5 py-3 text-right text-slate-500">{fmtNum(p.minStock)}</td>
-                    <td className="px-5 py-3 text-right text-slate-500">{avg.toFixed(2)}</td>
-                    <td className="px-5 py-3 text-right"><span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-brand-100 text-brand-700 font-bold text-sm">{fmtNum(suggested)} {p.unit}</span></td>
-                    <td className="px-5 py-3 text-xs text-slate-600">{supplier?.name || '—'}<div className="text-slate-400">{supplier?.phone}</div></td>
-                    <td className="px-5 py-3 text-right">
-                      <Button variant="success" className="text-xs px-3 py-1.5" onClick={()=>setPo({p, supplier, suggested})}><i className="fa-solid fa-file-invoice"></i>Reorder</Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {/* Input */}
+          <div className="flex items-center gap-2 p-3 border-t border-slate-100">
+            <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} placeholder="Ask me anything..." className="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 focus:border-brand-400 focus:outline-none text-sm" />
+            <button onClick={send} className="w-10 h-10 rounded-xl bg-brand-600 text-white flex items-center justify-center hover:bg-brand-700 transition magnetic ripple"><i className="fa-solid fa-paper-plane text-sm"></i></button>
           </div>
         </div>
       )}
-
-      <Modal open={!!po} onClose={()=>setPo(null)} title="Reorder suggestion" width="max-w-md">
-        {po && (
-          <div className="space-y-4">
-            <div className="bg-brand-50 rounded-xl p-4">
-              <div className="font-semibold text-slate-800">{po.p.name}</div>
-              <div className="text-xs text-slate-500 mt-1">{po.p.sku} · {po.p.category}</div>
-            </div>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div className="bg-slate-50 rounded-xl p-3"><div className="text-xs text-slate-400">On hand</div><div className="font-semibold">{po.p.qty} {po.p.unit}</div></div>
-              <div className="bg-slate-50 rounded-xl p-3"><div className="text-xs text-slate-400">Suggested qty</div><div className="font-semibold text-brand-700">{po.suggested} {po.p.unit}</div></div>
-            </div>
-            <div className="text-sm text-slate-600">
-              <div className="font-medium text-slate-700 mb-1">Supplier contact</div>
-              <div>{po.supplier?.name || 'Unassigned'}</div>
-              <div className="text-xs text-slate-500">{po.supplier?.contact} · {po.supplier?.phone}</div>
-              <div className="text-xs text-slate-500">{po.supplier?.email}</div>
-            </div>
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs text-emerald-700">
-              <i className="fa-solid fa-circle-info mr-1"></i> This is a suggestion. Update stock in Inventory once the delivery arrives.
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="secondary" onClick={()=>setPo(null)}>Close</Button>
-              <Button variant="success" onClick={()=>{ api.adjustQty(po.p.id, po.suggested); setPo(null); }}><i className="fa-solid fa-plus"></i>Add delivered stock</Button>
-            </div>
-          </div>
-        )}
-      </Modal>
-    </div>
+    </>
   );
 }
 
