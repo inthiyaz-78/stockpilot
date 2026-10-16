@@ -72,6 +72,52 @@ tailwind.config = { theme: { extend: { colors: { brand: { 50:'#eef2ff',100:'#e0e
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; } }
   @media (hover: none) { .magnetic:hover, .interactive-row:hover { transform:none; box-shadow:none; } }
   :focus-visible { outline:2px solid #6366f1; outline-offset:2px; }
+
+  /* ===== Dark Mode ===== */
+  .dark body { background:#0f172a; color:#e2e8f0; }
+  .dark .bg-slate-50 { background:#0f172a !important; }
+  .dark .bg-white { background:#1e293b !important; }
+  .dark .bg-slate-100 { background:#334155 !important; }
+  .dark .bg-slate-200 { background:#334155 !important; }
+  .dark .text-slate-800 { color:#e2e8f0 !important; }
+  .dark .text-slate-700 { color:#cbd5e1 !important; }
+  .dark .text-slate-600 { color:#94a3b8 !important; }
+  .dark .text-slate-500 { color:#64748b !important; }
+  .dark .text-slate-400 { color:#64748b !important; }
+  .dark .border-slate-100 { border-color:#334155 !important; }
+  .dark .border-slate-200 { border-color:#334155 !important; }
+  .dark .hover\:bg-slate-50:hover { background:#334155 !important; }
+  .dark .hover\:bg-slate-100:hover { background:#334155 !important; }
+  .dark .bg-white\/5 { background:rgba(255,255,255,.05) !important; }
+  .dark .bg-white\/10 { background:rgba(255,255,255,.1) !important; }
+  .dark .hover\:bg-white\/5:hover { background:rgba(255,255,255,.05) !important; }
+  .dark .hover\:bg-white\/10:hover { background:rgba(255,255,255,.1) !important; }
+  .dark .bg-slate-50\/50 { background:rgba(30,41,59,.5) !important; }
+  .dark .bg-brand-50 { background:#1e1b4b !important; }
+  .dark .bg-brand-100 { background:#312e81 !important; }
+  .dark .bg-emerald-50 { background:#052e16 !important; }
+  .dark .bg-emerald-100 { background:#064e2b !important; }
+  .dark .bg-amber-50 { background:#451a03 !important; }
+  .dark .bg-amber-100 { background:#78350f !important; }
+  .dark .bg-rose-50 { background:#450a0a !important; }
+  .dark .bg-rose-100 { background:#881337 !important; }
+  .dark .bg-sky-50 { background:#0c4a6e !important; }
+  .dark .bg-violet-50 { background:#2e1065 !important; }
+  .dark .bg-indigo-50 { background:#1e1b4b !important; }
+  .dark .bg-pink-50 { background:#500724 !important; }
+  .dark .bg-orange-50 { background:#431407 !important; }
+  .dark .bg-red-50 { background:#450a0a !important; }
+  .dark .bg-green-50 { background:#052e16 !important; }
+  .dark .bg-blue-50 { background:#1e3a5f !important; }
+  .dark .shadow-sm { box-shadow: 0 1px 2px 0 rgb(0 0 0 / .3) !important; }
+  .dark .shadow-soft { box-shadow: 0 10px 25px -5px rgb(0 0 0 / .4), 0 8px 10px -6px rgb(0 0 0 / .2) !important; }
+  .dark .ring-white\/10 { box-shadow: 0 0 0 2px rgba(255,255,255,.1) !important; }
+  .dark .modal-backdrop { background:rgba(0,0,0,.7) !important; }
+  .dark input, .dark select, .dark textarea { background:#1e293b !important; border-color:#334155 !important; color:#e2e8f0 !important; }
+  .dark input:focus, .dark select:focus, .dark textarea:focus { background:#0f172a !important; border-color:#6366f1 !important; }
+  .dark .table-row:hover td { background:#1e293b !important; }
+  .dark .scrollbar::-webkit-scrollbar-thumb { background:#475569 !important; }
+  .dark .interactive-row:hover { background:rgba(99,102,241,.1); }
 </style>
 </head>
 <body class="bg-slate-50 text-slate-800">

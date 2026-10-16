@@ -2121,6 +2121,19 @@ function App() {
   const [profile, setProfile] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [isPro, setIsPro] = useState(false);
+  const [dark, setDark] = useState(() => {
+    try {
+      return localStorage.getItem('stockpilot.dark') === '1';
+    } catch (e) {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('stockpilot.dark', dark ? '1' : '0');
+    } catch (e) {}
+    document.documentElement.classList.toggle('dark', dark);
+  }, [dark]);
   useEffect(() => {
     sbRef.current = sbClient;
   }, [sbClient]);
@@ -2642,11 +2655,17 @@ function App() {
     className: "ml-auto flex items-center gap-2"
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => setView('alerts'),
-    className: "relative w-9 h-9 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-500 magnetic"
+    className: "relative w-9 h-9 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-500 magnetic"
   }, /*#__PURE__*/React.createElement("i", {
     className: "fa-solid fa-bell"
   }), stats.low.length + stats.out.length > 0 && /*#__PURE__*/React.createElement("span", {
     className: "absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-white"
+  })), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setDark(!dark),
+    className: "w-9 h-9 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-500 magnetic",
+    title: dark ? 'Switch to light mode' : 'Switch to dark mode'
+  }, /*#__PURE__*/React.createElement("i", {
+    className: `fa-solid ${dark ? 'fa-sun' : 'fa-moon'}`
   })), /*#__PURE__*/React.createElement("button", {
     onClick: () => setPaymentModal(true),
     title: isPro ? 'Pro active — manage plan' : 'Upgrade to Pro',

@@ -905,6 +905,13 @@ function App() {
   const [profile, setProfile] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [isPro, setIsPro] = useState(false);
+  const [dark, setDark] = useState(() => { try { return localStorage.getItem('stockpilot.dark') === '1'; } catch(e) { return false; } });
+
+  useEffect(() => {
+    try { localStorage.setItem('stockpilot.dark', dark ? '1' : '0'); } catch(e) {}
+    document.documentElement.classList.toggle('dark', dark);
+  }, [dark]);
+
   useEffect(() => { sbRef.current = sbClient; }, [sbClient]);
   useEffect(() => { saveData(data, user?.id || 'anon'); }, [data, user?.id]);
   useEffect(() => {
@@ -1034,9 +1041,12 @@ function App() {
           <button className="md:hidden w-9 h-9 rounded-lg hover:bg-slate-100 flex items-center justify-center" onClick={()=>setMobileOpen(true)}><i className="fa-solid fa-bars"></i></button>
           <div><div className="text-xs text-slate-400 font-medium">StockPilot</div><h1 className="text-xl font-bold text-slate-800 leading-tight">{crumb()}</h1></div>
           <div className="ml-auto flex items-center gap-2">
-            <button onClick={()=>setView('alerts')} className="relative w-9 h-9 rounded-xl hover:bg-slate-100 flex items-center justify-center text-slate-500 magnetic">
+            <button onClick={()=>setView('alerts')} className="relative w-9 h-9 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-500 magnetic">
               <i className="fa-solid fa-bell"></i>
               {(stats.low.length+stats.out.length)>0 && <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-rose-500 ring-2 ring-white"></span>}
+            </button>
+            <button onClick={()=>setDark(!dark)} className="w-9 h-9 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center justify-center text-slate-500 magnetic" title={dark ? 'Switch to light mode' : 'Switch to dark mode'}>
+              <i className={`fa-solid ${dark ? 'fa-sun' : 'fa-moon'}`}></i>
             </button>
             <button onClick={()=>setPaymentModal(true)} title={isPro ? 'Pro active — manage plan' : 'Upgrade to Pro'} className={`h-9 px-3 rounded-xl text-sm font-semibold transition flex items-center gap-1.5 magnetic ${isPro ? 'bg-gradient-to-r from-amber-300 to-amber-500 text-slate-900 shadow-sm' : 'bg-gradient-to-r from-brand-500 to-brand-700 text-white hover:opacity-90'}`}>
               <i className="fa-solid fa-crown text-xs"></i><span className="hidden sm:inline">{isPro ? 'PRO' : 'Pro'}</span>
