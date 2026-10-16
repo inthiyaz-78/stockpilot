@@ -1200,6 +1200,7 @@ function Sales({
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
   const filtered = useMemo(() => {
     if (filter === 'all') return sales;
     const days = Number(filter);
@@ -1208,6 +1209,11 @@ function Sales({
   }, [sales, filter]);
   const totalRevenue = filtered.reduce((a, s) => a + s.qty * s.price, 0);
   const totalQty = filtered.reduce((a, s) => a + s.qty, 0);
+  const searchResults = useMemo(() => {
+    if (!search.trim()) return null;
+    const q = search.toLowerCase();
+    return products.filter(p => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
+  }, [search, products]);
   return /*#__PURE__*/React.createElement("div", {
     className: "space-y-4"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1220,12 +1226,55 @@ function Sales({
     key: v,
     onClick: () => setFilter(v),
     className: `px-3 py-1.5 rounded-lg text-xs font-medium transition magnetic ${filter === v ? 'bg-brand-600 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`
-  }, l))), /*#__PURE__*/React.createElement(Button, {
+  }, l))), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "relative flex-1 md:w-64"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"
+  }), /*#__PURE__*/React.createElement("input", {
+    value: search,
+    onChange: e => setSearch(e.target.value),
+    placeholder: "Search products...",
+    className: "w-full pl-9 pr-3 py-2.5 rounded-xl border border-slate-200 bg-white focus:border-brand-400 focus:ring-2 focus:ring-brand-100 outline-none text-sm"
+  })), /*#__PURE__*/React.createElement(Button, {
     onClick: () => setOpen(true),
     className: "magnetic ripple"
   }, /*#__PURE__*/React.createElement("i", {
     className: "fa-solid fa-plus"
-  }), "Record sale")), /*#__PURE__*/React.createElement("div", {
+  }), "Record sale"))), searchResults && /*#__PURE__*/React.createElement("div", {
+    className: "glass-card rounded-2xl shadow-layered border border-slate-100 p-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-2"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-xs font-medium text-slate-500"
+  }, searchResults.length, " result", searchResults.length !== 1 ? 's' : '', " for \"", search, "\""), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setSearch(''),
+    className: "text-xs text-slate-400 hover:text-brand-600 transition"
+  }, "Clear")), searchResults.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "text-sm text-slate-400 py-4 text-center"
+  }, "No products found matching \"", search, "\"") : /*#__PURE__*/React.createElement("div", {
+    className: "space-y-1.5 max-h-48 overflow-y-auto scrollbar"
+  }, searchResults.map(p => /*#__PURE__*/React.createElement("div", {
+    key: p.id,
+    className: "flex items-center justify-between p-2.5 rounded-xl bg-slate-50 hover:bg-brand-50 transition"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-sm font-medium text-slate-800"
+  }, p.name), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-400"
+  }, p.sku, " \xB7 ", p.category)), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-3"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-xs text-slate-500"
+  }, fmtNum(p.qty), " ", p.unit, " in stock"), /*#__PURE__*/React.createElement("span", {
+    className: "text-sm font-semibold text-slate-700"
+  }, fmtMoney(p.price)), /*#__PURE__*/React.createElement(Button, {
+    variant: "success",
+    className: "text-xs px-2.5 py-1",
+    onClick: () => setOpen(true)
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fa-solid fa-plus"
+  }), "Sell")))))), /*#__PURE__*/React.createElement("div", {
     className: "stagger-in grid grid-cols-1 sm:grid-cols-3 gap-4"
   }, /*#__PURE__*/React.createElement("div", {
     className: "glass-card rounded-2xl p-5 shadow-layered border border-slate-100"
