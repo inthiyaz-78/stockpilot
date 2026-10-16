@@ -1196,11 +1196,13 @@ function Sales({
   products,
   sales,
   prodById,
-  api
+  api,
+  user
 }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [billSale, setBillSale] = useState(null);
   const filtered = useMemo(() => {
     if (filter === 'all') return sales;
     const days = Number(filter);
@@ -1344,14 +1346,23 @@ function Sales({
       minute: '2-digit'
     }))), /*#__PURE__*/React.createElement("td", {
       className: "px-5 py-3 text-right"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center justify-end gap-1"
     }, /*#__PURE__*/React.createElement("button", {
+      onClick: () => setBillSale(s),
+      className: "w-8 h-8 rounded-lg hover:bg-brand-50 text-brand-500 magnetic ripple",
+      title: "View bill"
+    }, /*#__PURE__*/React.createElement("i", {
+      className: "fa-solid fa-file-invoice text-xs"
+    })), /*#__PURE__*/React.createElement("button", {
       onClick: () => {
         if (confirm('Delete this sale and restore stock?')) api.deleteSale(s.id);
       },
-      className: "w-8 h-8 rounded-lg hover:bg-rose-50 text-rose-500 magnetic ripple"
+      className: "w-8 h-8 rounded-lg hover:bg-rose-50 text-rose-500 magnetic ripple",
+      title: "Delete"
     }, /*#__PURE__*/React.createElement("i", {
       className: "fa-solid fa-trash text-xs"
-    }))));
+    })))));
   }))))), /*#__PURE__*/React.createElement(Modal, {
     open: open,
     onClose: () => setOpen(false),
@@ -1363,7 +1374,13 @@ function Sales({
       if (ok) setOpen(false);
     },
     onCancel: () => setOpen(false)
-  })));
+  })), /*#__PURE__*/React.createElement(BillModal, {
+    open: !!billSale,
+    onClose: () => setBillSale(null),
+    sale: billSale,
+    product: billSale ? prodById[billSale.productId] : null,
+    user: user
+  }));
 }
 function SaleForm({
   products,
@@ -2103,6 +2120,140 @@ function ProfileModal({
   }, /*#__PURE__*/React.createElement("i", {
     className: "fa-solid fa-right-from-bracket"
   }), "Sign out")));
+}
+
+// ---------- Bill / Receipt Generator (Printable PDF) ----------
+function BillModal({
+  open,
+  onClose,
+  sale,
+  product,
+  user
+}) {
+  if (!open || !sale) return null;
+  const invoiceNo = 'INV-' + sale.id.slice(-8).toUpperCase();
+  const date = new Date(sale.date);
+  const dateStr = date.toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric'
+  });
+  const timeStr = date.toLocaleTimeString('en-IN', {
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+  const subtotal = sale.qty * sale.price;
+  const gstRate = 18;
+  const gstAmt = Math.round(subtotal * gstRate) / 100;
+  const total = subtotal + gstAmt;
+  const sellerName = user && user.user_metadata && (user.user_metadata.full_name || user.user_metadata.name) || 'StockPilot Store';
+  return /*#__PURE__*/React.createElement("div", {
+    className: "fixed inset-0 z-50 flex items-center justify-center p-4 fade-in",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "absolute inset-0 bg-slate-900/40 modal-backdrop"
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "relative bg-white rounded-2xl shadow-soft w-full max-w-lg max-h-[92vh] overflow-auto pop-in",
+    onClick: e => e.stopPropagation()
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between px-6 py-4 border-b border-slate-100 no-print"
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "text-lg font-semibold text-slate-800"
+  }, "Bill / Receipt"), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    className: "w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fa-solid fa-xmark"
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "p-6 bill-content"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-center border-b-2 border-slate-800 pb-4 mb-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-2xl font-bold text-slate-900"
+  }, "StockPilot"), /*#__PURE__*/React.createElement("div", {
+    className: "text-sm text-slate-500"
+  }, "Inventory & Supply Store"), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-400 mt-1"
+  }, "Tax Invoice / Receipt")), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-2 gap-4 mb-4 text-sm"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-400 uppercase"
+  }, "Invoice No"), /*#__PURE__*/React.createElement("div", {
+    className: "font-mono font-semibold text-slate-800"
+  }, invoiceNo)), /*#__PURE__*/React.createElement("div", {
+    className: "text-right"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-400 uppercase"
+  }, "Date"), /*#__PURE__*/React.createElement("div", {
+    className: "font-semibold text-slate-800"
+  }, dateStr), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-500"
+  }, timeStr)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-400 uppercase"
+  }, "Sold By"), /*#__PURE__*/React.createElement("div", {
+    className: "font-medium text-slate-700"
+  }, sellerName)), /*#__PURE__*/React.createElement("div", {
+    className: "text-right"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-400 uppercase"
+  }, "Payment"), /*#__PURE__*/React.createElement("div", {
+    className: "font-medium text-slate-700"
+  }, "UPI / Cash"))), /*#__PURE__*/React.createElement("div", {
+    className: "border border-slate-200 rounded-lg overflow-hidden mb-4"
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "w-full text-sm"
+  }, /*#__PURE__*/React.createElement("thead", {
+    className: "bg-slate-50 text-slate-600 text-xs uppercase"
+  }, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
+    className: "text-left px-3 py-2"
+  }, "Item"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right px-3 py-2"
+  }, "Qty"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right px-3 py-2"
+  }, "Rate"), /*#__PURE__*/React.createElement("th", {
+    className: "text-right px-3 py-2"
+  }, "Amount"))), /*#__PURE__*/React.createElement("tbody", null, /*#__PURE__*/React.createElement("tr", {
+    className: "border-t border-slate-100"
+  }, /*#__PURE__*/React.createElement("td", {
+    className: "px-3 py-2.5"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "font-medium text-slate-800"
+  }, product?.name || 'Unknown'), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-400"
+  }, product?.sku)), /*#__PURE__*/React.createElement("td", {
+    className: "px-3 py-2.5 text-right"
+  }, fmtNum(sale.qty), " ", product?.unit), /*#__PURE__*/React.createElement("td", {
+    className: "px-3 py-2.5 text-right"
+  }, fmtMoney(sale.price)), /*#__PURE__*/React.createElement("td", {
+    className: "px-3 py-2.5 text-right font-semibold"
+  }, fmtMoney(subtotal)))))), /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-end mb-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-56 space-y-1.5 text-sm"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-between text-slate-600"
+  }, /*#__PURE__*/React.createElement("span", null, "Subtotal"), /*#__PURE__*/React.createElement("span", null, fmtMoney(subtotal))), /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-between text-slate-600"
+  }, /*#__PURE__*/React.createElement("span", null, "GST (", gstRate, "%)"), /*#__PURE__*/React.createElement("span", null, fmtMoney(gstAmt))), /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-between border-t border-slate-200 pt-1.5 text-base font-bold text-slate-900"
+  }, /*#__PURE__*/React.createElement("span", null, "Total"), /*#__PURE__*/React.createElement("span", null, fmtMoney(total))))), /*#__PURE__*/React.createElement("div", {
+    className: "text-center text-xs text-slate-400 border-t border-slate-100 pt-4"
+  }, /*#__PURE__*/React.createElement("div", null, "Thank you for your business!"), /*#__PURE__*/React.createElement("div", {
+    className: "mt-1"
+  }, "Generated by StockPilot \xB7 ", new Date().toLocaleString('en-IN')))), /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-2 px-6 py-4 border-t border-slate-100 no-print"
+  }, /*#__PURE__*/React.createElement(Button, {
+    variant: "secondary",
+    className: "flex-1 justify-center",
+    onClick: onClose
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fa-solid fa-xmark"
+  }), "Close"), /*#__PURE__*/React.createElement(Button, {
+    className: "flex-1 justify-center magnetic ripple",
+    onClick: () => window.print()
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fa-solid fa-print"
+  }), "Print / Save PDF"))));
 }
 function App() {
   const [data, setData] = useState(() => ({

@@ -389,10 +389,11 @@ function ProductForm({ initial, suppliers, onSave, onCancel }) {
   );
 }
 
-function Sales({ products, sales, prodById, api }) {
+function Sales({ products, sales, prodById, api, user }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [billSale, setBillSale] = useState(null);
   const filtered = useMemo(() => { if (filter==='all') return sales; const days = Number(filter); const cutoff = Date.now() - days*86400000; return sales.filter(s => new Date(s.date).getTime() >= cutoff); }, [sales, filter]);
   const totalRevenue = filtered.reduce((a,s)=>a+s.qty*s.price,0);
   const totalQty = filtered.reduce((a,s)=>a+s.qty,0);
@@ -472,7 +473,12 @@ function Sales({ products, sales, prodById, api }) {
                     <td className="px-5 py-3 text-right">{fmtMoney(s.price)}</td>
                     <td className="px-5 py-3 text-right font-semibold counter">{fmtMoney(s.qty*s.price)}</td>
                     <td className="px-5 py-3 text-slate-500">{fmtDate(s.date)} <span className="text-xs text-slate-400">{new Date(s.date).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})}</span></td>
-                    <td className="px-5 py-3 text-right"><button onClick={()=>{ if(confirm('Delete this sale and restore stock?')) api.deleteSale(s.id); }} className="w-8 h-8 rounded-lg hover:bg-rose-50 text-rose-500 magnetic ripple"><i className="fa-solid fa-trash text-xs"></i></button></td>
+                    <td className="px-5 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={()=>setBillSale(s)} className="w-8 h-8 rounded-lg hover:bg-brand-50 text-brand-500 magnetic ripple" title="View bill"><i className="fa-solid fa-file-invoice text-xs"></i></button>
+                        <button onClick={()=>{ if(confirm('Delete this sale and restore stock?')) api.deleteSale(s.id); }} className="w-8 h-8 rounded-lg hover:bg-rose-50 text-rose-500 magnetic ripple" title="Delete"><i className="fa-solid fa-trash text-xs"></i></button>
+                      </div>
+                    </td>
                   </tr>
                 ); })}
               </tbody>
@@ -483,6 +489,7 @@ function Sales({ products, sales, prodById, api }) {
       <Modal open={open} onClose={()=>setOpen(false)} title="Record sale">
         <SaleForm products={products} onSave={(form)=>{ const ok = api.recordSale(form); if(ok) setOpen(false); }} onCancel={()=>setOpen(false)} />
       </Modal>
+      <BillModal open={!!billSale} onClose={()=>setBillSale(null)} sale={billSale} product={billSale ? prodById[billSale.productId] : null} user={user} />
     </div>
   );
 }
@@ -889,6 +896,109 @@ function ProfileModal({ open, onClose, profile, user, isPro, onSignOut }) {
         <Button variant="danger" className="flex-1 justify-center" onClick={()=>{ try { onSignOut && onSignOut(); } catch(e){} }}><i className="fa-solid fa-right-from-bracket"></i>Sign out</Button>
       </div>
     </Modal>
+  );
+}
+
+// ---------- Bill / Receipt Generator (Printable PDF) ----------
+function BillModal({ open, onClose, sale, product, user }) {
+  if (!open || !sale) return null;
+  const invoiceNo = 'INV-' + sale.id.slice(-8).toUpperCase();
+  const date = new Date(sale.date);
+  const dateStr = date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  const timeStr = date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  const subtotal = sale.qty * sale.price;
+  const gstRate = 18;
+  const gstAmt = Math.round(subtotal * gstRate) / 100;
+  const total = subtotal + gstAmt;
+  const sellerName = (user && user.user_metadata && (user.user_metadata.full_name || user.user_metadata.name)) || 'StockPilot Store';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 fade-in" onClick={onClose}>
+      <div className="absolute inset-0 bg-slate-900/40 modal-backdrop"></div>
+      <div className="relative bg-white rounded-2xl shadow-soft w-full max-w-lg max-h-[92vh] overflow-auto pop-in" onClick={e=>e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 no-print">
+          <h3 className="text-lg font-semibold text-slate-800">Bill / Receipt</h3>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400"><i className="fa-solid fa-xmark"></i></button>
+        </div>
+
+        {/* Printable bill */}
+        <div className="p-6 bill-content">
+          {/* Header */}
+          <div className="text-center border-b-2 border-slate-800 pb-4 mb-4">
+            <div className="text-2xl font-bold text-slate-900">StockPilot</div>
+            <div className="text-sm text-slate-500">Inventory &amp; Supply Store</div>
+            <div className="text-xs text-slate-400 mt-1">Tax Invoice / Receipt</div>
+          </div>
+
+          {/* Meta */}
+          <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
+            <div>
+              <div className="text-xs text-slate-400 uppercase">Invoice No</div>
+              <div className="font-mono font-semibold text-slate-800">{invoiceNo}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs text-slate-400 uppercase">Date</div>
+              <div className="font-semibold text-slate-800">{dateStr}</div>
+              <div className="text-xs text-slate-500">{timeStr}</div>
+            </div>
+            <div>
+              <div className="text-xs text-slate-400 uppercase">Sold By</div>
+              <div className="font-medium text-slate-700">{sellerName}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-xs text-slate-400 uppercase">Payment</div>
+              <div className="font-medium text-slate-700">UPI / Cash</div>
+            </div>
+          </div>
+
+          {/* Items */}
+          <div className="border border-slate-200 rounded-lg overflow-hidden mb-4">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-600 text-xs uppercase">
+                <tr>
+                  <th className="text-left px-3 py-2">Item</th>
+                  <th className="text-right px-3 py-2">Qty</th>
+                  <th className="text-right px-3 py-2">Rate</th>
+                  <th className="text-right px-3 py-2">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-t border-slate-100">
+                  <td className="px-3 py-2.5">
+                    <div className="font-medium text-slate-800">{product?.name || 'Unknown'}</div>
+                    <div className="text-xs text-slate-400">{product?.sku}</div>
+                  </td>
+                  <td className="px-3 py-2.5 text-right">{fmtNum(sale.qty)} {product?.unit}</td>
+                  <td className="px-3 py-2.5 text-right">{fmtMoney(sale.price)}</td>
+                  <td className="px-3 py-2.5 text-right font-semibold">{fmtMoney(subtotal)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Totals */}
+          <div className="flex justify-end mb-4">
+            <div className="w-56 space-y-1.5 text-sm">
+              <div className="flex justify-between text-slate-600"><span>Subtotal</span><span>{fmtMoney(subtotal)}</span></div>
+              <div className="flex justify-between text-slate-600"><span>GST ({gstRate}%)</span><span>{fmtMoney(gstAmt)}</span></div>
+              <div className="flex justify-between border-t border-slate-200 pt-1.5 text-base font-bold text-slate-900"><span>Total</span><span>{fmtMoney(total)}</span></div>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div className="text-center text-xs text-slate-400 border-t border-slate-100 pt-4">
+            <div>Thank you for your business!</div>
+            <div className="mt-1">Generated by StockPilot · {new Date().toLocaleString('en-IN')}</div>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-2 px-6 py-4 border-t border-slate-100 no-print">
+          <Button variant="secondary" className="flex-1 justify-center" onClick={onClose}><i className="fa-solid fa-xmark"></i>Close</Button>
+          <Button className="flex-1 justify-center magnetic ripple" onClick={()=>window.print()}><i className="fa-solid fa-print"></i>Print / Save PDF</Button>
+        </div>
+      </div>
+    </div>
   );
 }
 

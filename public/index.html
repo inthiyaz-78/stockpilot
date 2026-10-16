@@ -118,6 +118,16 @@ tailwind.config = { theme: { extend: { colors: { brand: { 50:'#eef2ff',100:'#e0e
   .dark .table-row:hover td { background:#1e293b !important; }
   .dark .scrollbar::-webkit-scrollbar-thumb { background:#475569 !important; }
   .dark .interactive-row:hover { background:rgba(99,102,241,.1); }
+
+  /* ===== Print (Bill PDF) ===== */
+  @media print {
+    body { background:#fff !important; }
+    body * { visibility:hidden; }
+    .bill-content, .bill-content * { visibility:visible; }
+    .bill-content { position:absolute; left:0; top:0; width:100%; padding:20px; }
+    .no-print { display:none !important; }
+    .modal-backdrop { display:none !important; }
+  }
 </style>
 </head>
 <body class="bg-slate-50 text-slate-800">
