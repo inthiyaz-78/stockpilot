@@ -1715,7 +1715,9 @@ function Alerts({
   suppliers,
   supById,
   avgDailySales,
-  api
+  api,
+  setView,
+  sales
 }) {
   const lowItems = products.filter(p => p.qty <= p.minStock);
   const reorderList = lowItems.map(p => {
@@ -1730,6 +1732,15 @@ function Alerts({
       supplier: supById[p.supplier]
     };
   }).sort((a, b) => a.p.qty - a.p.minStock - (b.p.qty - b.p.minStock));
+  const demandPreview = sales ? products.map(p => {
+    const avg = avgDailySales(p.id, 7);
+    const daysLeft = avg > 0 ? Math.floor(p.qty / avg) : 999;
+    return {
+      p,
+      avg,
+      daysLeft
+    };
+  }).filter(x => x.avg > 0).sort((a, b) => a.daysLeft - b.daysLeft).slice(0, 3) : [];
   return /*#__PURE__*/React.createElement("div", {
     className: "space-y-4"
   }, /*#__PURE__*/React.createElement("div", {
@@ -1808,7 +1819,46 @@ function Alerts({
     onClick: () => api.adjustQty(p.id, suggested)
   }, /*#__PURE__*/React.createElement("i", {
     className: "fa-solid fa-plus"
-  }), "Restock")))))))));
+  }), "Restock")))))))), /*#__PURE__*/React.createElement("div", {
+    className: "glass-card rounded-2xl p-5 shadow-layered border border-indigo-100 dark:border-indigo-900/50 bg-gradient-to-r from-indigo-50/60 via-white to-violet-50/60 dark:from-indigo-950/20 dark:via-slate-900 dark:to-violet-950/20"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white flex items-center justify-center"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fa-solid fa-wand-magic-sparkles text-sm"
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "font-semibold text-slate-800 dark:text-slate-100 text-sm"
+  }, "Demand Forecast & Analysis"), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-500"
+  }, "Predicted stockouts from last 7-day sales velocity"))), setView && /*#__PURE__*/React.createElement("button", {
+    onClick: () => setView('forecast'),
+    className: "text-sm text-brand-600 font-medium hover:underline shrink-0"
+  }, "Open full forecast \u2192")), demandPreview.length === 0 ? /*#__PURE__*/React.createElement("div", {
+    className: "text-sm text-slate-500"
+  }, "Record sales to unlock demand predictions. ", /*#__PURE__*/React.createElement("button", {
+    onClick: () => setView && setView('forecast'),
+    className: "text-brand-600 font-medium hover:underline"
+  }, "View forecast")) : /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-1 md:grid-cols-3 gap-2"
+  }, demandPreview.map(({
+    p,
+    avg,
+    daysLeft
+  }) => /*#__PURE__*/React.createElement("div", {
+    key: p.id,
+    className: "rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2.5 flex items-center justify-between"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "min-w-0"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-sm font-medium text-slate-800 dark:text-slate-100 truncate"
+  }, p.name), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-400"
+  }, avg.toFixed(1), "/day \xB7 ", daysLeft > 900 ? '∞' : daysLeft + ' days left')), /*#__PURE__*/React.createElement("span", {
+    className: `text-xs font-bold px-2 py-1 rounded-lg shrink-0 ml-2 ${daysLeft <= 7 ? 'bg-rose-100 text-rose-700' : daysLeft <= 14 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`
+  }, daysLeft > 900 ? '∞' : daysLeft + 'd'))))));
 }
 function PaymentModal({
   open,
@@ -2255,6 +2305,241 @@ function BillModal({
     className: "fa-solid fa-print"
   }), "Print / Save PDF"))));
 }
+
+// ---------- Demand Forecasting & Analysis ----------
+function ForecastView({
+  products,
+  sales,
+  supById,
+  api
+}) {
+  const chartRef = useRef(null);
+  const chartInstance = useRef(null);
+
+  // Compute per-product forecast data
+  const forecastData = useMemo(() => {
+    return products.map(p => {
+      // Daily sales for last 30 days
+      const daily = [];
+      for (let i = 29; i >= 0; i--) {
+        const d = daysAgo(i).toDateString();
+        const qty = sales.filter(s => s.productId === p.id && new Date(s.date).toDateString() === d).reduce((a, s) => a + s.qty, 0);
+        daily.push(qty);
+      }
+      const avg7 = daily.slice(-7).reduce((a, b) => a + b, 0) / 7;
+      const avg30 = daily.reduce((a, b) => a + b, 0) / 30;
+      const trend = avg7 > avg30 * 1.1 ? 'up' : avg7 < avg30 * 0.9 ? 'down' : 'stable';
+      const trendPct = avg30 > 0 ? Math.round((avg7 - avg30) / avg30 * 100) : 0;
+
+      // Projected demand next 14 days
+      const projected = Math.ceil(avg7 * 14);
+      const daysLeft = avg7 > 0 ? Math.floor(p.qty / avg7) : 999;
+      const stockoutDate = avg7 > 0 ? new Date(Date.now() + daysLeft * 86400000) : null;
+      const suggestedReorder = Math.max(0, Math.ceil(p.minStock + projected - p.qty));
+      return {
+        p,
+        avg7,
+        avg30,
+        trend,
+        trendPct,
+        daily,
+        projected,
+        daysLeft,
+        stockoutDate,
+        suggestedReorder
+      };
+    }).filter(f => f.avg7 > 0 || f.p.qty > 0).sort((a, b) => a.daysLeft - b.daysLeft);
+  }, [products, sales]);
+
+  // Chart: top 5 products — 14-day history + 7-day projection
+  useEffect(() => {
+    if (!chartRef.current) return;
+    if (chartInstance.current) {
+      chartInstance.current.destroy();
+      chartInstance.current = null;
+    }
+    if (forecastData.length === 0) return;
+    const top5 = [...forecastData].sort((a, b) => b.avg7 - a.avg7).slice(0, 5);
+    const labels = [];
+    for (let i = 13; i >= 0; i--) labels.push(daysAgo(i).toLocaleDateString('en-IN', {
+      day: 'numeric',
+      month: 'short'
+    }));
+    for (let i = 1; i <= 7; i++) labels.push('+' + i + 'd');
+    const datasets = top5.map((f, idx) => {
+      const colors = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
+      const historical = f.daily.slice(-14);
+      const proj = Math.round(f.avg7 * 10) / 10;
+      const data = historical.concat(Array(7).fill(proj));
+      return {
+        label: f.p.name,
+        data,
+        borderColor: colors[idx % colors.length],
+        backgroundColor: colors[idx % colors.length] + '20',
+        borderWidth: 2,
+        tension: 0.3,
+        pointRadius: 0
+      };
+    });
+    chartInstance.current = new Chart(chartRef.current, {
+      type: 'line',
+      data: {
+        labels,
+        datasets
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: {
+              boxWidth: 12,
+              font: {
+                size: 11
+              }
+            }
+          }
+        },
+        scales: {
+          y: {
+            beginAtZero: true,
+            grid: {
+              color: '#f1f5f9'
+            }
+          },
+          x: {
+            grid: {
+              display: false
+            }
+          }
+        }
+      }
+    });
+    return () => {
+      if (chartInstance.current) chartInstance.current.destroy();
+    };
+  }, [forecastData]);
+  const urgentCount = forecastData.filter(f => f.daysLeft <= 7).length;
+  const totalReorderValue = forecastData.reduce((a, f) => a + f.suggestedReorder * (f.p.cost || f.p.price), 0);
+  const hasSales = sales.length > 0;
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll ? forecastData : forecastData.slice(0, 9);
+  if (products.length === 0) {
+    return /*#__PURE__*/React.createElement("div", {
+      className: "glass-card rounded-2xl shadow-layered border border-slate-100 dark:border-slate-800"
+    }, /*#__PURE__*/React.createElement(Empty, {
+      icon: "fa-solid fa-wand-magic-sparkles",
+      title: "No products yet",
+      sub: "Add products and record sales to unlock demand forecasting."
+    }));
+  }
+  return /*#__PURE__*/React.createElement("div", {
+    className: "space-y-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bg-gradient-to-r from-indigo-50 via-white to-violet-50 dark:from-indigo-950/30 dark:via-slate-900 dark:to-violet-950/30 border border-indigo-100 dark:border-indigo-900/50 rounded-2xl p-5 flex items-start gap-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white flex items-center justify-center text-xl shrink-0"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fa-solid fa-wand-magic-sparkles"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "flex-1"
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "font-semibold text-slate-800 dark:text-slate-100"
+  }, "Demand Forecasting & Analysis"), /*#__PURE__*/React.createElement("p", {
+    className: "text-sm text-slate-600 dark:text-slate-400 mt-0.5"
+  }, "AI-powered demand prediction based on your sales history. Plan reorders before stockouts happen.")), /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-center"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-2xl font-bold text-rose-600"
+  }, urgentCount), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-500"
+  }, "Urgent")), /*#__PURE__*/React.createElement("div", {
+    className: "text-center"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-2xl font-bold text-brand-600"
+  }, fmtMoney(Math.round(totalReorderValue))), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-500"
+  }, "Reorder value")))), /*#__PURE__*/React.createElement("div", {
+    className: "glass-card rounded-2xl p-5 shadow-layered border border-slate-100 dark:border-slate-800"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-4"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h3", {
+    className: "font-semibold text-slate-800 dark:text-slate-100"
+  }, "Demand Forecast \u2014 Top 5 Products"), /*#__PURE__*/React.createElement("p", {
+    className: "text-xs text-slate-400"
+  }, "14-day history + 7-day projection (daily units)")), /*#__PURE__*/React.createElement(Badge, {
+    tone: "violet"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fa-solid fa-chart-line mr-1"
+  }), "14-day forecast")), forecastData.length === 0 || !hasSales ? /*#__PURE__*/React.createElement("div", {
+    className: "text-center py-8 text-sm text-slate-500"
+  }, "Not enough sales history yet \u2014 record a few sales and the forecast chart will appear here.") : /*#__PURE__*/React.createElement("div", {
+    className: "h-64"
+  }, /*#__PURE__*/React.createElement("canvas", {
+    ref: chartRef
+  }))), !hasSales && /*#__PURE__*/React.createElement("div", {
+    className: "rounded-2xl p-4 border border-sky-200 bg-sky-50 text-sm text-sky-800"
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fa-solid fa-circle-info mr-1"
+  }), " Forecast is stock-based right now (no sales recorded yet). Averages will become accurate once you record sales."), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 stagger-in"
+  }, visible.map(f => /*#__PURE__*/React.createElement("div", {
+    key: f.p.id,
+    className: "glass-card magnetic rounded-2xl p-4 shadow-layered border border-slate-100 dark:border-slate-800 transition-all"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-start justify-between mb-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "min-w-0"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "font-medium text-slate-800 dark:text-slate-100 text-sm truncate"
+  }, f.p.name), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-400"
+  }, f.p.sku)), /*#__PURE__*/React.createElement(Badge, {
+    tone: f.trend === 'up' ? 'green' : f.trend === 'down' ? 'red' : 'slate'
+  }, /*#__PURE__*/React.createElement("i", {
+    className: `fa-solid fa-arrow-trend-${f.trend === 'up' ? 'up' : f.trend === 'down' ? 'down' : 'right'} mr-1`
+  }), f.trendPct > 0 ? '+' : '', f.trendPct, "%")), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-3 gap-2 mb-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-center p-2 rounded-lg bg-slate-50 dark:bg-slate-800"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-400"
+  }, "In stock"), /*#__PURE__*/React.createElement("div", {
+    className: "font-bold text-slate-800 dark:text-slate-100"
+  }, fmtNum(f.p.qty))), /*#__PURE__*/React.createElement("div", {
+    className: "text-center p-2 rounded-lg bg-slate-50 dark:bg-slate-800"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-400"
+  }, "Avg/day"), /*#__PURE__*/React.createElement("div", {
+    className: "font-bold text-slate-800 dark:text-slate-100"
+  }, f.avg7.toFixed(1))), /*#__PURE__*/React.createElement("div", {
+    className: "text-center p-2 rounded-lg bg-slate-50 dark:bg-slate-800"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-slate-400"
+  }, "Days left"), /*#__PURE__*/React.createElement("div", {
+    className: `font-bold ${f.daysLeft <= 7 ? 'text-rose-600' : f.daysLeft <= 14 ? 'text-amber-600' : 'text-emerald-600'}`
+  }, f.daysLeft > 900 ? '∞' : f.daysLeft))), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between text-xs text-slate-500 mb-3"
+  }, /*#__PURE__*/React.createElement("span", null, "Projected: ", /*#__PURE__*/React.createElement("b", {
+    className: "text-slate-700 dark:text-slate-300"
+  }, fmtNum(f.projected)), " / 14 days"), f.stockoutDate && /*#__PURE__*/React.createElement("span", null, "Stockout: ", /*#__PURE__*/React.createElement("b", {
+    className: "text-rose-600"
+  }, fmtDate(f.stockoutDate)))), f.suggestedReorder > 0 && /*#__PURE__*/React.createElement(Button, {
+    variant: "success",
+    className: "w-full justify-center text-xs py-2 magnetic ripple",
+    onClick: () => api.adjustQty(f.p.id, f.suggestedReorder)
+  }, /*#__PURE__*/React.createElement("i", {
+    className: "fa-solid fa-plus"
+  }), " Reorder ", fmtNum(f.suggestedReorder), " ", f.p.unit)))), forecastData.length > 9 && /*#__PURE__*/React.createElement("div", {
+    className: "text-center"
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowAll(!showAll),
+    className: "text-sm text-brand-600 font-medium hover:underline"
+  }, showAll ? 'Show less ↑' : `Show all ${forecastData.length} products →`)));
+}
 function App() {
   const [data, setData] = useState(() => ({
     products: [],
@@ -2447,6 +2732,10 @@ function App() {
     id: 'alerts',
     label: 'Low Stock & Reorder',
     icon: 'fa-solid fa-triangle-exclamation'
+  }, {
+    id: 'forecast',
+    label: 'Demand Forecast',
+    icon: 'fa-solid fa-wand-magic-sparkles'
   }];
   function crumb() {
     return nav.find(n => n.id === view)?.label || 'Dashboard';
@@ -2868,7 +3157,8 @@ function App() {
     products: products,
     sales: sales,
     prodById: prodById,
-    api: api
+    api: api,
+    user: user
   }), view === 'suppliers' && /*#__PURE__*/React.createElement(Suppliers, {
     suppliers: suppliers,
     products: products,
@@ -2878,6 +3168,13 @@ function App() {
     suppliers: suppliers,
     supById: supById,
     avgDailySales: avgDailySales,
+    api: api,
+    setView: setView,
+    sales: sales
+  }), view === 'forecast' && /*#__PURE__*/React.createElement(ForecastView, {
+    products: products,
+    sales: sales,
+    supById: supById,
     api: api
   })))), /*#__PURE__*/React.createElement(PaymentModal, {
     open: paymentModal,
