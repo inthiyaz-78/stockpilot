@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>StockPilot — Inventory &amp; Supply Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = { theme: { extend: { colors: { brand: { 50:'#eef2ff',100:'#e0e7ff',200:'#c7d2fe',300:'#a5b4fc',400:'#818cf8',500:'#6366f1',600:'#4f46e5',700:'#4338ca',800:'#3730a3',900:'#312e81' } }, boxShadow: { soft:'0 10px 30px -12px rgba(99,102,241,0.25)' } } } };
+</script>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+<style>
+  body { font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  .scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+  .scrollbar::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:999px; }
+  .modal-backdrop { backdrop-filter: blur(4px); }
+  @keyframes fadeIn { from {opacity:0; transform:translateY(6px)} to {opacity:1; transform:none} }
+  .fade-in { animation: fadeIn .25s ease-out; }
+  @keyframes slideIn { from {transform:translateX(-100%)} to {transform:none} }
+  .slide-in { animation: slideIn .2s ease-out; }
+  .table-row:hover td { background:#f8fafc; }
+  .kpi { transition: transform .15s ease, box-shadow .15s ease; }
+  .kpi:hover { transform: translateY(-2px); box-shadow: 0 12px 28px -14px rgba(99,102,241,.35); }
+  @keyframes floatY { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-14px) } }
+  .float-y { animation: floatY 6s ease-in-out infinite; }
+  @keyframes blob { 0%,100% { transform: translate(0,0) scale(1) } 33% { transform: translate(40px,-30px) scale(1.12) } 66% { transform: translate(-30px,20px) scale(.92) } }
+  .blob { animation: blob 16s ease-in-out infinite; }
+  .blob-2 { animation: blob 20s ease-in-out infinite reverse; }
+  @keyframes fadeUp { from { opacity:0; transform: translateY(22px) } to { opacity:1; transform:none } }
+  .fade-up { opacity:0; animation: fadeUp .8s cubic-bezier(.2,.7,.2,1) forwards; }
+  @keyframes gradientShift { 0%,100% { background-position: 0% 50% } 50% { background-position: 100% 50% } }
+  .gradient-text { background: linear-gradient(90deg,#818cf8,#a78bfa,#38bdf8,#818cf8); background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: gradientShift 6s ease infinite; }
+  @keyframes logoPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(99,102,241,.55), 0 18px 50px -12px rgba(99,102,241,.6) } 50% { box-shadow: 0 0 0 16px rgba(99,102,241,0), 0 18px 60px -8px rgba(129,140,248,.75) } }
+  .logo-pulse { animation: logoPulse 3s ease-in-out infinite; }
+  @keyframes spinSlow { to { transform: rotate(360deg) } }
+  .ring-spin { animation: spinSlow 14s linear infinite; }
+  @keyframes shine { 0% { transform: translateX(-120%) } 60%,100% { transform: translateX(320%) } }
+  .btn-shine { position: relative; overflow: hidden; }
+  .btn-shine::after { content:''; position:absolute; top:0; left:0; width:40%; height:100%; background: linear-gradient(90deg, transparent, rgba(255,255,255,.6), transparent); transform: translateX(-120%); }
+  .btn-shine:hover::after { animation: shine 1s ease; }
+  @keyframes marquee { from { transform: translateX(0) } to { transform: translateX(-50%) } }
+  .marquee { animation: marquee 26s linear infinite; }
+  .grid-bg { background-image: linear-gradient(rgba(148,163,184,.09) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,.09) 1px, transparent 1px); background-size: 44px 44px; }
+  .glass { background: rgba(255,255,255,.92); backdrop-filter: blur(18px); }
+
+  /* ===== Modern Interactive (compact) ===== */
+  .magnetic { transition:transform .12s cubic-bezier(.2,.7,.2,1), box-shadow .12s ease; }
+  .magnetic:active { transform:scale(.96); transition:transform .05s; }
+  .stagger-in > * { opacity:0; transform:translateY(16px); animation:staggerUp .4s cubic-bezier(.2,.7,.2,1) forwards; }
+  @keyframes staggerUp { to{opacity:1;transform:none} }
+  .stagger-in > *:nth-child(1){animation-delay:0ms}
+  .stagger-in > *:nth-child(2){animation-delay:50ms}
+  .stagger-in > *:nth-child(3){animation-delay:100ms}
+  .stagger-in > *:nth-child(4){animation-delay:150ms}
+  .stagger-in > *:nth-child(5){animation-delay:200ms}
+  .stagger-in > *:nth-child(6){animation-delay:250ms}
+  .glass-card { background:rgba(255,255,255,.75); backdrop-filter:blur(16px); border:1px solid rgba(255,255,255,.35); }
+  .shadow-layered { box-shadow:0 2px 8px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.05); }
+  .counter { display:inline-block; animation:countUp .5s cubic-bezier(.2,.7,.2,1) backwards; }
+  @keyframes countUp { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
+  .ripple { position:relative; overflow:hidden; }
+  .ripple::after { content:''; position:absolute; inset:0; background:rgba(255,255,255,.3); transform:scale(0); animation:rippleOut .3s ease-out; pointer-events:none; }
+  @keyframes rippleOut { to{transform:scale(4);opacity:0} }
+  .interactive-row:hover { background:rgba(99,102,241,.05); transform:translateX(3px); }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; } }
+  @media (hover: none) { .magnetic:hover, .interactive-row:hover { transform:none; box-shadow:none; } }
+  :focus-visible { outline:2px solid #6366f1; outline-offset:2px; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+<div id="root"></div>
+<script src="app.js"></script>
+</body>
+</html>
