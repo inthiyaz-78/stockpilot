@@ -3,13 +3,6 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "mkdir -p public && npx babel index.html --out-file public/index.html --presets @babel/preset-react @babel/preset-env --plugins @babel/plugin-transform-modules-commonjs --source-type=unambiguous --no-babelrc"
-  },
-  "devDependencies": {
-    "@babel/cli": "^7.23.0",
-    "@babel/core": "^7.23.0",
-    "@babel/plugin-transform-modules-commonjs": "^7.23.0",
-    "@babel/preset-env": "^7.23.0",
-    "@babel/preset-react": "^7.23.0"
+    "build": "mkdir -p public && cp index.html public/ && cp app.js public/"
   }
 }
